@@ -1,0 +1,2 @@
+# Normalize line endings so exact-byte artifact hashes and diffs match on every platform.
+* text=auto eol=lf
