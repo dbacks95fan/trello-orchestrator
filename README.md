@@ -19,9 +19,10 @@ for any product board, but simultaneous multi-board processing is not supported.
 | --- | --- |
 | Backlog → Prioritized | Validate the pinned intent/profile and product-owner ID; record schema-valid freeze activation data and the current projection. |
 | Prioritized → Spec & Design | Verify the active freeze, record a StageInvocation, and invoke Spec & Design. Only a schema-valid Work Contract v3 bound to frozen inputs can be reported ready for human review. |
-| Spec & Design → Execution | Require a product-owner `SpecAcceptanceRecord`; retrieve the referenced spec and Work Contract from GitHub, verify hashes, and validate Work Contract v3 against the active freeze. |
-| Execution -> Evaluation | Send StageInvocation 1.1 to Coding, validate its StageResult and Evidence Package, then give Evaluator immutable refs and exact artifact bytes. |
-| Evaluation -> Human Approval | Require the Evaluator result and published Evaluation Package reference before moving a passing item to Human Approval. The accountable human still decides whether to proceed. |
+| Spec & Design → Execution | Require a product-owner `SpecAcceptanceRecord` comment on the card; retrieve the referenced spec and Work Contract from GitHub, verify hashes, and validate Work Contract v3 against the active freeze. |
+| Execution (entry) | Build StageInvocation 1.1 from the accepted artifacts and run the Coding Agent. Validate its StageResult and Evidence Package, record the Evaluator handoff, and move a `candidate_complete` card to Evaluation. |
+| Evaluation (entry) | Call the NAS Evaluator with the candidate SHA and the exact contract, evidence, and intent bytes. Validate the returned Evaluation Package reference and move a `pass` to Human Approval. `fail` and `needs_decision` stay in Evaluation. |
+| Human Approval and later | Check in-order movement and product-owner identity only. Human Approval, Release, Production Observation, and Done records are not yet validated. |
 
 Returning a card from Prioritized or Spec & Design to Backlog or New Ideas
 revokes its active freeze while preserving the event history. The webhook
@@ -30,47 +31,63 @@ blocks out-of-order moves, validates owner identity, and deduplicates event IDs.
 Later human records are not enforced yet; see
 [`docs/HUMAN_RECORDS.md`](docs/HUMAN_RECORDS.md).
 
-Trello Orchestrator — not Claude — owns all Trello reads and writes. It calls the
-Trello REST API directly with a key/token/secret; the Coding Agent it invokes
-has no Trello access at all.
+The Orchestrator owns all Trello reads and writes. It calls the Trello REST API
+directly with a key/token/secret; none of the agents it invokes has Trello
+access.
 
-The evaluator runs remotely on the NAS. When a candidate is complete, Trello
-Orchestrator verifies the candidate branch is clean, commits the Work Contract and
-evidence to that branch, pushes it, and records the immutable commit SHA in the
-card handoff comment. When the card enters Evaluation, the Evaluator checks
-out that SHA into temporary container storage, evaluates it, and removes the
-checkout before responding.
+The Orchestrator never writes product-repository Git refs. Each agent commits
+and pushes its own output to `work/<intent-id>`: the Spec & Design Agent its
+spec and Work Contract, the Coding Agent its candidate and Evidence Package,
+and the Evaluator its Evaluation Package. The Orchestrator reads the returned
+references, checks them with a read-only GitHub App token, and records them on
+the card. The Evaluator runs on the NAS; it checks out the candidate SHA into
+temporary container storage and removes the checkout before responding.
 
 ## Structure
 
 ```
 src/
-├── server.ts                    Express app: webhook endpoint, startup/registration
-├── config.ts                    env var loading + the shared webhookUrl constant
+├── server.ts                      Express app: webhook endpoint, transition dispatch, startup/registration
+├── config.ts                      env var loading + the shared webhookUrl constant
+├── runtimeConfig.ts               locates the runtime env file outside project repositories
+├── githubApp.ts                   mints repository-scoped, read-only GitHub App tokens
+├── boardTemplate.ts               loads the canonical Trello board template
+├── boardBootstrap.ts              reconciles a board to the template lists
+├── boardBootstrapCli.ts           `npm run bootstrap-board` dry-run/apply command
+├── manualSpecDesignCli.ts         `npm run spec-design:manual` local operator command
+├── contracts/
+│   └── lifecycle.ts               validates records against the canonical lifecycle schema
 ├── trello/
-│   ├── client.ts                thin Trello REST API wrapper (lists, cards, comments, webhooks)
-│   └── webhookVerify.ts         HMAC signature check on incoming deliveries
-   ├── workflow/
-│   ├── workflow.ts              the queues + per-card state machines
-│   ├── wip.ts                   WIP limit check against the configured Execution list ID
-│   ├── contractFromCard.ts      deterministic card-description -> Work Contract parser
-│   ├── specRequestFromCard.ts   card metadata + intent-backlog fetch -> Spec & Design request
-│   ├── specWorkspace.ts         clones work/<intent-id>, stages frozen intent/profile
-│   ├── freezeState.ts           reads/writes the current card freeze projection
-│   └── specRouting.ts           Spec & Design result -> board destination + decision brief
+│   ├── client.ts                  thin Trello REST API wrapper (lists, cards, comments, webhooks)
+│   ├── webhookVerify.ts           HMAC signature check on incoming deliveries
+│   └── webhookEvent.ts            card-move action -> canonical BoardTransitionEvent
+├── workflow/
+│   ├── workflow.ts                queues and per-stage handlers (freeze, Spec & Design, Execution, Evaluation)
+│   ├── boardTransition.ts         validates, deduplicates, and authorizes board transitions
+│   ├── transitionPolicy.ts        configured list IDs -> allowed in-order transitions
+│   ├── wip.ts                     WIP limit check against the configured Execution list ID
+│   ├── freezeState.ts             reads/writes the current card freeze projection
+│   ├── specRequestFromCard.ts     card metadata + intent-backlog fetch -> Spec & Design request
+│   ├── specWorkspace.ts           stages frozen intent/profile snapshots in an invocation bundle
+│   ├── specRouting.ts             Spec & Design result -> card comment + decision brief
+│   ├── workContractV3.ts          checks a proposed Work Contract v3 against the active freeze
+│   ├── humanRecords.ts            parses and verifies SpecAcceptanceRecord comments
+│   ├── acceptedExecutionContract.ts  revalidates acceptance and builds the Execution StageInvocation
+│   ├── codingContractAdapter.ts   checks accepted validation names/commands against the supported gates
+│   └── contractFromCard.ts        Work Contract type shared by the adapter
 ├── codingAgent/
-│   └── runCodingAgent.ts        spawns the coding-agent CLI as a subprocess
+│   └── runCodingAgent.ts          runs the Coding Agent's `run --invocation` command as a subprocess
 ├── specDesignAgent/
-│   └── runSpecDesignAgent.ts    runs the spec-design-agent image as a one-shot container
+│   └── runSpecDesignAgent.ts      runs the spec-design-agent image as a one-shot container
 └── evaluatorAgent/
-    ├── gitHandoff.ts            commits + pushes immutable evaluator artifacts
-    └── remote.ts                authenticated request to the NAS Evaluator
+    ├── gitHandoff.ts              builds the read-only Evaluator handoff from Coding Agent references
+    └── remote.ts                  authenticated request to the NAS Evaluator
 ```
 
 Grouped by concern rather than kept flat: `trello/` is everything that talks to
 Trello's API, `workflow/` is the orchestration logic that doesn't care which
 task-tracker it came from, and each `*Agent/` directory is one integration
-point with a tool it invokes.
+point with an agent it invokes.
 
 ## Spec & Design trigger
 
@@ -145,16 +162,20 @@ checks their exact fingerprints against that freeze before invocation. It also
 records a schema-valid StageInvocation and StageResult. A generated spec is
 not an approval; human review remains within Spec & Design.
 
-**Current integration boundary:** the real Spec & Design Agent does not yet
-return a committed Work Contract v3 reference. This Orchestrator therefore blocks
-`spec_ready` and does not publish that result for Design Review until the
-contract exists and passes canonical validation. Local contract-valid test
-doubles exercise the intended Orchestrator boundary; they do not prove the
-separate agent integration. After a valid acceptance, the Orchestrator adapts v3
-to the Coding Agent's v2 input on the accepted work branch. It blocks any
-validation gate or command that the Coding Agent cannot run exactly. Later
-Human Approval, Release, Production Observation, and Done records remain
-manual and are not enforced by this build.
+A `spec_ready` result must name the committed `spec.md` path, Work Contract
+path, and commit (`specPath`, `workContractPath`, `specCommit`). The
+Orchestrator reads both files at that commit from the agent's clone in the
+invocation bundle, validates the Work Contract v3 against the frozen inputs,
+and records their hashes in the StageResult. A result without those references,
+or with a contract that fails validation, is recorded as `blocked`. A live
+Spec & Design run against a real product repository has not yet been verified.
+
+After a valid acceptance, the Orchestrator checks that every `required_validation`
+name and command in the accepted contract is one the Coding Agent supports
+exactly, and blocks the card in Execution if not. It then sends the Coding Agent
+a StageInvocation 1.1 whose input artifacts are the accepted spec and Work
+Contract. Later Human Approval, Release, Production Observation, and Done
+records remain manual and are not enforced by this build.
 
 ## What it does, step by step
 
@@ -173,22 +194,26 @@ manual and are not enforced by this build.
 5. Moving to Execution requires a product-owner SpecAcceptanceRecord. The
    Orchestrator checks its schema, authorization, work identity, immutable artifact
    hashes, StageResult references, Work Contract v3 fields, and target revision.
-6. The Orchestrator creates the Coding Agent's v2 contract from the accepted v3
-   contract and spec. It accepts only validation names and commands that map
-   exactly to the Coding Agent's fixed deterministic gates, then runs it on a
-   worktree based on the accepted Spec & Design branch.
-7. For a `candidate_complete` result, Trello Orchestrator records the Work Contract
-   and Evidence Package in the candidate branch, pushes the branch, and writes
-   the repository URL, commit SHA, and repository-relative artifact paths to
-   the evaluator handoff comment.
-8. When the card enters the configured `Evaluation` list ID, Trello Orchestrator calls the
-   authenticated `EVALUATOR_API_URL` endpoint. The evaluator validates the
-   allowed repository URL, checks out the supplied SHA into request-scoped
-   temporary storage, and returns its JSON result.
-9. A non-candidate Coding Agent result leaves the card in Execution. Only a
-   candidate is sent to Evaluation. A passing Evaluation can move the card to
-   Human Approval; later human records and Release/Observation/Done transitions
-   are not yet enforced. The Orchestrator never moves a card to Done.
+6. The Orchestrator accepts only validation names and commands that exactly
+   match its fixed list in `src/workflow/codingContractAdapter.ts` (`build`,
+   `automated_tests`, `playwright`, `docker_build`). The Coding Agent separately
+   checks them against its own operator manifest. The Orchestrator then sends a StageInvocation 1.1 targeting
+   the accepted spec commit on `work/<intent-id>` to the Coding Agent.
+7. The Coding Agent commits and pushes the candidate and its Evidence Package
+   itself. For a `candidate_complete` result, the Orchestrator validates the
+   StageResult and Evidence Package against the canonical schema and writes the
+   repository URL, candidate SHA, and artifact references to the Evaluator
+   handoff comment, then moves the card to Evaluation.
+8. When the card enters the configured `Evaluation` list ID, the Orchestrator
+   calls the authenticated `EVALUATOR_API_URL` endpoint. The Evaluator checks
+   out the supplied SHA into request-scoped temporary storage, evaluates it,
+   publishes its Evaluation Package to the work branch, and returns its result
+   and the package reference.
+9. A non-candidate Coding Agent result leaves the card in Execution. A passing
+   Evaluation moves the card to Human Approval. A failing evaluation stays in
+   Evaluation; the rework route back to Execution is not built yet. Later human
+   records and Release/Observation/Done transitions are not yet enforced. The
+   Orchestrator never moves a card to Done.
 
 ## Setup
 
@@ -302,14 +327,13 @@ canonical deployment target.
   which means a new webhook registration — the old one is left dangling on
   Trello (harmless, just unused) until manually cleaned up. A named tunnel with
   a real domain would fix this; out of scope for now.
-- **The WIP queue is in-memory only.** A card sitting in `Execution`
-  when Trello Orchestrator restarts will not be picked up automatically — move
-  it out and back into the list to re-trigger the webhook, or wait for a
-  future periodic-sweep fallback (not built yet).
-- **The card-description parser is deliberately non-judgmental, not
-  general-purpose.** It tolerates a handful of known heading aliases (see
-  `SECTION_ALIASES` in `contractFromCard.ts`) and refuses to let an
-  unrecognized heading's content leak into a recognized section, but it is
-  still pattern-matching, not the Codex Planner — a genuinely novel section
-  structure will fail loudly rather than being silently misparsed or guessed
-  at.
+- **The WIP queue is in-memory only.** A card queued in `Execution` when the
+  Orchestrator restarts is not picked up again. Moving it out of Execution is
+  an out-of-order move and is blocked, so there is no supported re-trigger yet;
+  the card needs human resolution.
+- **One board per instance.** Each running instance subscribes to the single
+  board in `TRELLO_BOARD_ID`; the canonical multi-board registry is not
+  implemented.
+- **Execution reads a local product clone.** Building the Execution invocation
+  runs read-only `git` commands against a clone under `SPEC_WORKSPACE_ROOT`, so
+  the Orchestrator must run on the host that ran Spec & Design.

@@ -21,7 +21,7 @@ Moving a card from `Spec & Design` to `Execution` requires a valid `SpecAcceptan
 - The references match the latest validated `spec_ready` StageResult, whose `StageInvocation` supplies the target base revision.
 - `work-contract.yaml` validates as Work Contract v3 and binds the same product, intent, version, frozen intent/profile references, and product repository.
 
-After that gate passes, the Orchestrator translates the v3 contract into the Coding Agent's v2 input on the accepted work branch. The adapter accepts only these exact supported pairs: `build` / `npm run build`, `automated_tests` / `npm run test:server`, `playwright` / `npm run test:e2e`, and `docker_build` / `docker build -t coding-agent-validation:latest .`. Unsupported names or command differences hold the card in Execution for resolution.
+After that gate passes, the Orchestrator checks the accepted contract's `required_validation` and sends the Coding Agent a StageInvocation 1.1 for the accepted work branch. The check accepts only these exact supported pairs: `build` / `npm run build`, `automated_tests` / `npm run test:server`, `playwright` / `npm run test:e2e`, and `docker_build` / `docker build -t coding-agent-validation:latest .`. Unsupported names or command differences hold the card in Execution for resolution.
 
 Example shape (replace all sample values with actual immutable references and hashes):
 
