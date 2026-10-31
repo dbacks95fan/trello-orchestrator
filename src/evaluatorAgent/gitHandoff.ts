@@ -37,14 +37,30 @@ export async function prepareGitEvaluationHandoff(input: GitEvaluationHandoffInp
   const intentId = String(workItem?.intent_id ?? "");
   const intentPath = `.agent/work/${intentId}/intent.md`;
   const contract = evidencePackage.input_artifacts as Array<Record<string, unknown>> | undefined;
-  if (!workItem || !target || !candidate || !freezeIntent || !evidenceRef || !contractRef || !contract?.some((ref) => ref.path === contractRef.path)) {
-    throw new Error("Coding Agent output is missing the candidate or immutable artifact references required by Evaluation.");
+  if (
+    !workItem ||
+    !target ||
+    !candidate ||
+    !freezeIntent ||
+    !evidenceRef ||
+    !contractRef ||
+    !contract?.some((ref) => ref.path === contractRef.path)
+  ) {
+    throw new Error(
+      "Coding Agent output is missing the candidate or immutable artifact references required by Evaluation.",
+    );
   }
-  if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/i.test(repositoryUrl)) throw new Error("The candidate repository must be an HTTPS GitHub repository.");
-  if (candidate.repository !== repositoryUrl || evidenceRef.repository !== repositoryUrl || contractRef.repository !== repositoryUrl) {
+  if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/i.test(repositoryUrl))
+    throw new Error("The candidate repository must be an HTTPS GitHub repository.");
+  if (
+    candidate.repository !== repositoryUrl ||
+    evidenceRef.repository !== repositoryUrl ||
+    contractRef.repository !== repositoryUrl
+  ) {
     throw new Error("The candidate and Evaluation inputs must reference the same product repository.");
   }
-  if (evidenceRef.commit_sha === candidate.commit_sha) throw new Error("The Evidence Package must be committed after the immutable candidate.");
+  if (evidenceRef.commit_sha === candidate.commit_sha)
+    throw new Error("The Evidence Package must be committed after the immutable candidate.");
   return {
     workItem,
     repositoryUrl,
@@ -52,7 +68,12 @@ export async function prepareGitEvaluationHandoff(input: GitEvaluationHandoffInp
     candidateRevision: String(candidate.commit_sha ?? ""),
     branchRevision: String(evidenceRef.commit_sha ?? ""),
     intentPath,
-    intentRef: { repository: repositoryUrl, commit_sha: candidate.commit_sha, path: intentPath, sha256: freezeIntent.sha256 },
+    intentRef: {
+      repository: repositoryUrl,
+      commit_sha: candidate.commit_sha,
+      path: intentPath,
+      sha256: freezeIntent.sha256,
+    },
     contractRef,
     evidenceRef,
     packagePath: `.agent/work/${intentId}/evaluation-package/evaluation.json`,

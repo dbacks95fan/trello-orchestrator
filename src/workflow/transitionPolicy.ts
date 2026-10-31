@@ -61,7 +61,8 @@ export function resolveTransition(
   if (!from || !to) return { from, to, action: "invalid", requiresProductOwner: false };
   if (to === "backlog" || to === "newIdeas") {
     if (preExecution.has(from)) return { from, to, action: "revoke_freeze", requiresProductOwner: true };
-    if (from === "backlog" && to === "newIdeas") return { from, to, action: "refine_in_new_ideas", requiresProductOwner: true };
+    if (from === "backlog" && to === "newIdeas")
+      return { from, to, action: "refine_in_new_ideas", requiresProductOwner: true };
   }
   const action = allowed[`${from}->${to}`] ?? "invalid";
   const requiresProductOwner = new Set<TransitionAction>([

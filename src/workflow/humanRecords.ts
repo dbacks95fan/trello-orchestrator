@@ -11,7 +11,12 @@ import { validateWorkContractV3 } from "./workContractV3.js";
 export const HUMAN_RECORD_MARKER = "<!-- agentic-sdlc-human-record ";
 
 function sameArtifactRef(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  return left.repository === right.repository && left.commit_sha === right.commit_sha && left.path === right.path && left.sha256 === right.sha256;
+  return (
+    left.repository === right.repository &&
+    left.commit_sha === right.commit_sha &&
+    left.path === right.path &&
+    left.sha256 === right.sha256
+  );
 }
 
 export function parseHumanRecordComment(text: string): { definition: string; record: unknown } | null {
@@ -27,19 +32,33 @@ export function parseHumanRecordComment(text: string): { definition: string; rec
   }
 }
 
-export async function readArtifactRef(ref: Record<string, unknown>, apiBase: string, token: string, fetchFn: typeof fetch = fetch): Promise<string> {
+export async function readArtifactRef(
+  ref: Record<string, unknown>,
+  apiBase: string,
+  token: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<string> {
   const repository = new URL(String(ref.repository));
-  if (repository.protocol !== "https:" || repository.hostname !== "github.com") throw new Error("Artifact repository must be an HTTPS GitHub URL.");
+  if (repository.protocol !== "https:" || repository.hostname !== "github.com")
+    throw new Error("Artifact repository must be an HTTPS GitHub URL.");
   const parts = repository.pathname.split("/").filter(Boolean);
   if (parts.length !== 2) throw new Error("Artifact repository URL must identify one GitHub owner and repository.");
   const path = String(ref.path);
-  if (!path || path.startsWith("/") || path.split(/[\\/]/).includes("..")) throw new Error("Artifact path must be repository-relative and cannot traverse directories.");
+  if (!path || path.startsWith("/") || path.split(/[\\/]/).includes(".."))
+    throw new Error("Artifact path must be repository-relative and cannot traverse directories.");
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   const url = `${apiBase.replace(/\/$/, "")}/repos/${parts[0]}/${parts[1]}/contents/${encodedPath}?ref=${encodeURIComponent(String(ref.commit_sha))}`;
-  const headers: Record<string, string> = { Accept: "application/vnd.github.raw+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "trello-orchestrator" };
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.raw+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "trello-orchestrator",
+  };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetchFn(url, { headers });
-  if (!response.ok) throw new Error(`GitHub could not read ${parts[0]}/${parts[1]}@${String(ref.commit_sha).slice(0, 12)}:${path} (HTTP ${response.status}).`);
+  if (!response.ok)
+    throw new Error(
+      `GitHub could not read ${parts[0]}/${parts[1]}@${String(ref.commit_sha).slice(0, 12)}:${path} (HTTP ${response.status}).`,
+    );
   const content = await response.text();
   const digest = createHash("sha256").update(content, "utf8").digest("hex");
   if (digest !== ref.sha256) throw new Error(`Artifact hash mismatch for ${path}.`);
@@ -76,7 +95,8 @@ export async function validateSpecAcceptanceRecord(options: SpecAcceptanceValida
     workItem.product_id !== freeze.tuple.productId ||
     workItem.intent_id !== freeze.tuple.intentId ||
     workItem.intent_version !== freeze.tuple.intentVersion
-  ) return ["The acceptance work_item does not match the active frozen card and intent."];
+  )
+    return ["The acceptance work_item does not match the active frozen card and intent."];
   if (value.authorized_by !== actorId || !productConfig.authorized_product_owner_ids.includes(actorId)) {
     return ["The acceptance record author must be the authorized product owner who made this board transition."];
   }
@@ -84,7 +104,11 @@ export async function validateSpecAcceptanceRecord(options: SpecAcceptanceValida
   const artifacts = [value.spec, value.work_contract] as Array<Record<string, unknown>>;
   let contents: string[];
   try {
-    contents = await Promise.all(artifacts.map((artifact) => readArtifactRef(artifact, options.githubApiBase, options.productRepositoryReadToken, options.fetchFn ?? fetch)));
+    contents = await Promise.all(
+      artifacts.map((artifact) =>
+        readArtifactRef(artifact, options.githubApiBase, options.productRepositoryReadToken, options.fetchFn ?? fetch),
+      ),
+    );
   } catch (error) {
     return [error instanceof Error ? error.message : String(error)];
   }
@@ -92,7 +116,9 @@ export async function validateSpecAcceptanceRecord(options: SpecAcceptanceValida
   try {
     contract = parseYaml(contents[1]);
   } catch (error) {
-    return [`The accepted Work Contract could not be parsed: ${error instanceof Error ? error.message : String(error)}`];
+    return [
+      `The accepted Work Contract could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
+    ];
   }
   let resolved;
   try {
@@ -115,32 +141,42 @@ export async function validateSpecAcceptanceRecord(options: SpecAcceptanceValida
     resolved.policyProfileId !== freeze.tuple.policyProfileId ||
     resolved.policyProfileVersion !== freeze.tuple.policyProfileVersion ||
     resolved.policyProfileContentSha256 !== freeze.tuple.policyProfileSha256
-  ) return ["The intent or policy profile no longer matches the active freeze."];
+  )
+    return ["The intent or policy profile no longer matches the active freeze."];
   const specRef = value.spec as Record<string, unknown>;
   const workContractRef = value.work_contract as Record<string, unknown>;
-  if (!sameArtifactRef(specRef, options.expectedSpec) || !sameArtifactRef(workContractRef, options.expectedWorkContract)) {
+  if (
+    !sameArtifactRef(specRef, options.expectedSpec) ||
+    !sameArtifactRef(workContractRef, options.expectedWorkContract)
+  ) {
     return ["The accepted artifact references do not match the latest validated spec_ready StageResult."];
   }
   if (specRef.repository !== workContractRef.repository || specRef.commit_sha !== workContractRef.commit_sha) {
     return ["The accepted spec and Work Contract must be committed to the same repository revision."];
   }
-  const expectedTargetRepo = productConfig.target_repository.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
-  const contractTarget = (contract as Record<string, unknown>)?.target as Record<string, unknown> | undefined;
-  const issues = validateWorkContractV3(contract, {
-    productId: resolved.productId,
-    intentId: resolved.intentId,
-    intentVersion: resolved.intentVersion,
-    cardId: card.id,
-    intentRepository: `https://github.com/${resolved.intentRepository}`,
-    intentCommit: resolved.intentCommit,
-    intentPath: resolved.intentPath,
-    intentSha256: frozenArtifactSha256(resolved.frozenIntentBytes),
-    policyProfileId: resolved.policyProfileId,
-    policyProfileVersion: resolved.policyProfileVersion,
-    policyProfilePath: resolved.policyProfilePath,
-    policyProfileSha256: resolved.policyProfileContentSha256,
-    targetRepository: expectedTargetRepo,
-    targetCommit: options.expectedTargetCommit,
-  }, validator);
+  const expectedTargetRepo = productConfig.target_repository
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  const issues = validateWorkContractV3(
+    contract,
+    {
+      productId: resolved.productId,
+      intentId: resolved.intentId,
+      intentVersion: resolved.intentVersion,
+      cardId: card.id,
+      intentRepository: `https://github.com/${resolved.intentRepository}`,
+      intentCommit: resolved.intentCommit,
+      intentPath: resolved.intentPath,
+      intentSha256: frozenArtifactSha256(resolved.frozenIntentBytes),
+      policyProfileId: resolved.policyProfileId,
+      policyProfileVersion: resolved.policyProfileVersion,
+      policyProfilePath: resolved.policyProfilePath,
+      policyProfileSha256: resolved.policyProfileContentSha256,
+      targetRepository: expectedTargetRepo,
+      targetCommit: options.expectedTargetCommit,
+    },
+    validator,
+  );
   return issues;
 }

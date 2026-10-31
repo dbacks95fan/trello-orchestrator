@@ -77,7 +77,10 @@ export interface ResolveSpecRequestOptions {
 function metadataValue(desc: string, label: string): string | undefined {
   const wanted = label.toLowerCase();
   for (const raw of desc.split(/\r?\n/)) {
-    const cleaned = raw.replace(/\*\*/g, "").replace(/^\s*[-*+]\s+/, "").trim();
+    const cleaned = raw
+      .replace(/\*\*/g, "")
+      .replace(/^\s*[-*+]\s+/, "")
+      .trim();
     const colon = cleaned.indexOf(":");
     if (colon === -1) continue;
     if (cleaned.slice(0, colon).trim().toLowerCase() !== wanted) continue;
@@ -197,7 +200,12 @@ async function fetchFrozenIntent(
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function fetchFrozenFile(location: CanonicalLocation, path: string, ref: string, options: ResolveSpecRequestOptions): Promise<Buffer> {
+async function fetchFrozenFile(
+  location: CanonicalLocation,
+  path: string,
+  ref: string,
+  options: ResolveSpecRequestOptions,
+): Promise<Buffer> {
   return fetchFrozenIntent({ ...location, path }, ref, options);
 }
 
@@ -242,13 +250,19 @@ export async function resolveSpecRequest(
   const fm = frozenIntentFrontmatter(frozenIntentBytes.toString("utf8"));
 
   const mismatches: string[] = [];
-  if (str(fm.intent_id) !== meta.intentId) mismatches.push(`intent_id (card ${meta.intentId} vs backlog ${str(fm.intent_id) || "missing"})`);
-  if (str(fm.product_id) !== meta.productId) mismatches.push(`product_id (card ${meta.productId} vs backlog ${str(fm.product_id) || "missing"})`);
-  if (Number(fm.intent_version) !== meta.intentVersion) mismatches.push(`intent_version (card ${meta.intentVersion} vs backlog ${str(fm.intent_version) || "missing"})`);
+  if (str(fm.intent_id) !== meta.intentId)
+    mismatches.push(`intent_id (card ${meta.intentId} vs backlog ${str(fm.intent_id) || "missing"})`);
+  if (str(fm.product_id) !== meta.productId)
+    mismatches.push(`product_id (card ${meta.productId} vs backlog ${str(fm.product_id) || "missing"})`);
+  if (Number(fm.intent_version) !== meta.intentVersion)
+    mismatches.push(`intent_version (card ${meta.intentVersion} vs backlog ${str(fm.intent_version) || "missing"})`);
   const backlogHash = frontmatterValue(fm, "intent_hash", "content_hash").match(CONTENT_HASH)?.[1];
-  if (backlogHash !== meta.intentContentSha256) mismatches.push("intent_hash (card projection and backlog artifact disagree)");
-  if (str(fm.policy_profile_id) !== meta.policyProfileId) mismatches.push("policy_profile_id (card projection and backlog artifact disagree)");
-  if (str(fm.policy_profile_version) !== meta.policyProfileVersion) mismatches.push("policy_profile_version (card projection and backlog artifact disagree)");
+  if (backlogHash !== meta.intentContentSha256)
+    mismatches.push("intent_hash (card projection and backlog artifact disagree)");
+  if (str(fm.policy_profile_id) !== meta.policyProfileId)
+    mismatches.push("policy_profile_id (card projection and backlog artifact disagree)");
+  if (str(fm.policy_profile_version) !== meta.policyProfileVersion)
+    mismatches.push("policy_profile_version (card projection and backlog artifact disagree)");
   if (mismatches.length > 0) {
     throw new SpecRequestError(
       `The Trello card and the canonical intent.md disagree and must be reconciled before Spec & Design starts: ${mismatches.join("; ")}.`,
@@ -256,7 +270,10 @@ export async function resolveSpecRequest(
   }
 
   const productMatch = location.path.match(/^(.*?products\/([^/]+))\//);
-  if (!productMatch) throw new SpecRequestError("Canonical intent path must be inside products/<product>/ so the selected policy profile can be resolved.");
+  if (!productMatch)
+    throw new SpecRequestError(
+      "Canonical intent path must be inside products/<product>/ so the selected policy profile can be resolved.",
+    );
   const productRoot = productMatch[1];
   const productConfigBytes = await fetchFrozenFile(location, `${productRoot}/product.yaml`, meta.intentCommit, options);
   const parsedProductConfig = parseYaml(productConfigBytes.toString("utf8"));
@@ -266,19 +283,39 @@ export async function resolveSpecRequest(
   }
   const productConfig = parsedProductConfig as ProductConfig;
   if (productConfig.product_id !== meta.productId) {
-    throw new SpecRequestError(`product.yaml product_id "${productConfig.product_id}" does not match the card's Product ID "${meta.productId}".`);
+    throw new SpecRequestError(
+      `product.yaml product_id "${productConfig.product_id}" does not match the card's Product ID "${meta.productId}".`,
+    );
   }
-  const configuredTargetUrl = options.targetRepositoryUrl?.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
-  if (configuredTargetUrl && productConfig.target_repository.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase() !== configuredTargetUrl) {
-    throw new SpecRequestError("product.yaml target_repository does not match the configured target repository's origin URL.");
+  const configuredTargetUrl = options.targetRepositoryUrl
+    ?.replace(/\.git$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  if (
+    configuredTargetUrl &&
+    productConfig.target_repository
+      .replace(/\.git$/, "")
+      .replace(/\/$/, "")
+      .toLowerCase() !== configuredTargetUrl
+  ) {
+    throw new SpecRequestError(
+      "product.yaml target_repository does not match the configured target repository's origin URL.",
+    );
   }
   if (card.idBoard && productConfig.trello_board_id !== card.idBoard) {
     throw new SpecRequestError("product.yaml trello_board_id does not match the Trello card's board.");
   }
   const profiles = productConfig.policy_profiles;
   const profileRelativePath = profiles?.[meta.policyProfileId];
-  if (typeof profileRelativePath !== "string" || !profileRelativePath || profileRelativePath.startsWith("/") || profileRelativePath.split("/").includes("..")) {
-    throw new SpecRequestError(`product.yaml does not map policy profile ID "${meta.policyProfileId}" to a safe repository-relative path.`);
+  if (
+    typeof profileRelativePath !== "string" ||
+    !profileRelativePath ||
+    profileRelativePath.startsWith("/") ||
+    profileRelativePath.split("/").includes("..")
+  ) {
+    throw new SpecRequestError(
+      `product.yaml does not map policy profile ID "${meta.policyProfileId}" to a safe repository-relative path.`,
+    );
   }
   const policyProfilePath = `${productRoot}/${profileRelativePath}`;
   const frozenPolicyProfileBytes = await fetchFrozenFile(location, policyProfilePath, meta.intentCommit, options);
@@ -286,7 +323,9 @@ export async function resolveSpecRequest(
   const profileId = profileText.match(/^Profile ID:\s*(.+?)\s*$/m)?.[1];
   const profileVersion = profileText.match(/^Version:\s*(.+?)\s*$/m)?.[1];
   if (profileId !== meta.policyProfileId || profileVersion !== meta.policyProfileVersion) {
-    throw new SpecRequestError("The selected policy profile ID/version does not match its profile document at the pinned intent commit.");
+    throw new SpecRequestError(
+      "The selected policy profile ID/version does not match its profile document at the pinned intent commit.",
+    );
   }
 
   const warnings: string[] = [];
@@ -305,8 +344,14 @@ export async function resolveSpecRequest(
     );
   }
   const backlogCardId = str(fm.trello_card_id);
-  if (backlogCardId && ![card.id, String(card.idShort), card.shortLink].includes(backlogCardId) && !card.url.includes(backlogCardId)) {
-    warnings.push(`The canonical intent.md records trello_card_id "${backlogCardId}" which does not obviously match this card (${card.idShort}).`);
+  if (
+    backlogCardId &&
+    ![card.id, String(card.idShort), card.shortLink].includes(backlogCardId) &&
+    !card.url.includes(backlogCardId)
+  ) {
+    warnings.push(
+      `The canonical intent.md records trello_card_id "${backlogCardId}" which does not obviously match this card (${card.idShort}).`,
+    );
   }
 
   let approvedAt = options.approvedAt;

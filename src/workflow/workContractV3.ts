@@ -20,12 +20,22 @@ export interface WorkContractExpectation {
 }
 
 function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-function equalArtifact(value: unknown, expected: { repository: string; commit_sha: string; path: string; sha256: string }): boolean {
+function equalArtifact(
+  value: unknown,
+  expected: { repository: string; commit_sha: string; path: string; sha256: string },
+): boolean {
   const artifact = record(value);
-  return artifact?.repository === expected.repository && artifact.commit_sha === expected.commit_sha && artifact.path === expected.path && artifact.sha256 === expected.sha256;
+  return (
+    artifact?.repository === expected.repository &&
+    artifact.commit_sha === expected.commit_sha &&
+    artifact.path === expected.path &&
+    artifact.sha256 === expected.sha256
+  );
 }
 
 /** Return all schema and frozen-reference mismatches; any mismatch blocks spec acceptance. */
@@ -45,13 +55,17 @@ export function validateWorkContractV3(
     workItem.intent_id !== expected.intentId ||
     workItem.intent_version !== expected.intentVersion ||
     workItem.trello_card_id !== expected.cardId
-  ) issues.push("The Work Contract work_item does not match the active product, intent, version, and Trello card.");
-  if (!equalArtifact(contract.intent, {
-    repository: expected.intentRepository,
-    commit_sha: expected.intentCommit,
-    path: expected.intentPath,
-    sha256: expected.intentSha256,
-  })) issues.push("The Work Contract intent reference does not match the frozen intent.");
+  )
+    issues.push("The Work Contract work_item does not match the active product, intent, version, and Trello card.");
+  if (
+    !equalArtifact(contract.intent, {
+      repository: expected.intentRepository,
+      commit_sha: expected.intentCommit,
+      path: expected.intentPath,
+      sha256: expected.intentSha256,
+    })
+  )
+    issues.push("The Work Contract intent reference does not match the frozen intent.");
   if (
     contract.policy_profile_id !== expected.policyProfileId ||
     contract.policy_profile_version !== expected.policyProfileVersion ||
@@ -61,7 +75,8 @@ export function validateWorkContractV3(
       path: expected.policyProfilePath,
       sha256: expected.policyProfileSha256,
     })
-  ) issues.push("The Work Contract policy profile reference does not match the frozen profile.");
+  )
+    issues.push("The Work Contract policy profile reference does not match the frozen profile.");
   if (target?.repository !== expected.targetRepository || target.commit_sha !== expected.targetCommit) {
     issues.push("The Work Contract target repository and base revision do not match the assigned workspace.");
   }

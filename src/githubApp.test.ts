@@ -38,20 +38,30 @@ test("mints a contents-read token scoped to the assigned product repository", as
     const authorization = new Headers(requestInit?.headers).get("authorization");
     assert.ok(authorization?.startsWith("Bearer "));
     const jwt = authorization!.slice("Bearer ".length).split(".");
-    const claims = JSON.parse(Buffer.from(jwt[1], "base64url").toString("utf8")) as { iss: string; iat: number; exp: number };
+    const claims = JSON.parse(Buffer.from(jwt[1], "base64url").toString("utf8")) as {
+      iss: string;
+      iat: number;
+      exp: number;
+    };
     assert.equal(claims.iss, "12345");
     assert.equal(claims.exp - claims.iat, 540);
-    assert.equal(verify("RSA-SHA256", Buffer.from(`${jwt[0]}.${jwt[1]}`), publicKey, Buffer.from(jwt[2], "base64url")), true);
+    assert.equal(
+      verify("RSA-SHA256", Buffer.from(`${jwt[0]}.${jwt[1]}`), publicKey, Buffer.from(jwt[2], "base64url")),
+      true,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
 test("rejects non-GitHub repositories before requesting an app token", async () => {
-  await assert.rejects(createGitHubAppReadToken({
-    appId: "12345",
-    installationId: "67890",
-    privateKeyFile: "unused.pem",
-    repositoryUrl: "https://example.com/owner/repo.git",
-  }), /HTTPS GitHub repository URL/);
+  await assert.rejects(
+    createGitHubAppReadToken({
+      appId: "12345",
+      installationId: "67890",
+      privateKeyFile: "unused.pem",
+      repositoryUrl: "https://example.com/owner/repo.git",
+    }),
+    /HTTPS GitHub repository URL/,
+  );
 });

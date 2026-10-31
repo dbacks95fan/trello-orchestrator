@@ -28,10 +28,20 @@ function validContract() {
   return {
     schema_version: 3,
     work_item: { product_id: "MF", intent_id: "INT-MF-0042", intent_version: 3, trello_card_id: "card-123" },
-    intent: { repository: expectation.intentRepository, commit_sha: expectation.intentCommit, path: expectation.intentPath, sha256: expectation.intentSha256 },
+    intent: {
+      repository: expectation.intentRepository,
+      commit_sha: expectation.intentCommit,
+      path: expectation.intentPath,
+      sha256: expectation.intentSha256,
+    },
     policy_profile_id: "MF-DEFAULT",
     policy_profile_version: "1",
-    policy_profile: { repository: expectation.intentRepository, commit_sha: expectation.intentCommit, path: expectation.policyProfilePath, sha256: expectation.policyProfileSha256 },
+    policy_profile: {
+      repository: expectation.intentRepository,
+      commit_sha: expectation.intentCommit,
+      path: expectation.policyProfilePath,
+      sha256: expectation.policyProfileSha256,
+    },
     target: { repository: expectation.targetRepository, commit_sha: expectation.targetCommit },
     acceptance_criteria: ["The user can plan a week of meals."],
     permitted_scope: { included: ["Weekly meal planning"], excluded: ["Shopping list export"] },

@@ -17,7 +17,10 @@ function base64Url(value: string | Buffer): string {
 }
 
 function githubRepository(repositoryUrl: string): string {
-  const match = repositoryUrl.replace(/\.git$/i, "").replace(/\/$/, "").match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
+  const match = repositoryUrl
+    .replace(/\.git$/i, "")
+    .replace(/\/$/, "")
+    .match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/i);
   if (!match) throw new Error("GitHub App access requires an HTTPS GitHub repository URL.");
   return match[2];
 }
@@ -52,7 +55,8 @@ export async function createGitHubAppReadToken(request: GitHubAppReadTokenReques
     },
   );
   if (!response.ok) throw new Error(`GitHub App could not mint an Orchestrator read token (HTTP ${response.status}).`);
-  const body = await response.json() as { token?: unknown };
-  if (typeof body.token !== "string" || !body.token) throw new Error("GitHub App token response did not contain an installation token.");
+  const body = (await response.json()) as { token?: unknown };
+  if (typeof body.token !== "string" || !body.token)
+    throw new Error("GitHub App token response did not contain an installation token.");
   return body.token;
 }

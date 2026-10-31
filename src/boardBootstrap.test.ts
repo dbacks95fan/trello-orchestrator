@@ -1,7 +1,13 @@
 // ABOUTME: Verifies board provisioning creates and orders required lists without touching cards.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BoardBootstrapError, bootstrapBoard, planBoardBootstrap, type BoardClient, type BoardList } from "./boardBootstrap.js";
+import {
+  BoardBootstrapError,
+  bootstrapBoard,
+  planBoardBootstrap,
+  type BoardClient,
+  type BoardList,
+} from "./boardBootstrap.js";
 
 class FakeBoardClient implements BoardClient {
   constructor(private lists: BoardList[]) {}
@@ -21,7 +27,9 @@ class FakeBoardClient implements BoardClient {
     if (index < 0) throw new Error(`Unknown list ${listId}`);
     const [list] = this.lists.splice(index, 1);
     this.lists.splice(Math.max(0, Math.min(pos - 1, this.lists.length)), 0, list);
-    this.lists.forEach((entry, entryIndex) => { entry.pos = entryIndex + 1; });
+    this.lists.forEach((entry, entryIndex) => {
+      entry.pos = entryIndex + 1;
+    });
     return { ...list };
   }
 }
@@ -44,5 +52,8 @@ test("creates missing lists and establishes canonical order", async () => {
 test("refuses an unexpected list instead of moving or deleting existing work", async () => {
   const client = new FakeBoardClient([{ id: "legacy", name: "Legacy work", pos: 1 }]);
   await assert.rejects(() => bootstrapBoard(client, lifecycle, true), BoardBootstrapError);
-  assert.deepEqual((await client.getLists()).map((list) => list.name), ["Legacy work"]);
+  assert.deepEqual(
+    (await client.getLists()).map((list) => list.name),
+    ["Legacy work"],
+  );
 });

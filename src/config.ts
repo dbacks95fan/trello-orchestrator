@@ -26,9 +26,11 @@ export const config = {
   trelloApiSecret: required("TRELLO_API_SECRET"),
   boardId: required("TRELLO_BOARD_ID"),
   boardWorkflowTemplate:
-    process.env.TRELLO_WORKFLOW_TEMPLATE ?? resolve(targetRepo, "..", "agentic-sdlc", "templates", "trello-board-workflow.yaml"),
+    process.env.TRELLO_WORKFLOW_TEMPLATE ??
+    resolve(targetRepo, "..", "agentic-sdlc", "templates", "trello-board-workflow.yaml"),
   lifecycleSchemaPath:
-    process.env.AGENTIC_SDLC_SCHEMA_PATH ?? resolve(targetRepo, "..", "agentic-sdlc", "schemas", "lifecycle-contracts.schema.json"),
+    process.env.AGENTIC_SDLC_SCHEMA_PATH ??
+    resolve(targetRepo, "..", "agentic-sdlc", "schemas", "lifecycle-contracts.schema.json"),
   wipLimit: Number(process.env.WIP_LIMIT ?? "1"),
   // The Coding Agent runs as an authenticated HTTP service on the NAS; the
   // Orchestrator holds only its API token, never the agent's own credentials.
@@ -48,7 +50,8 @@ export const config = {
   specDesignUvBin: process.env.SPEC_DESIGN_UV ?? "uv",
   // Agent-specific env-file passed directly to the Spec & Design runtime.
   specDesignRuntimeEnvFile:
-    process.env.SPEC_DESIGN_AGENT_RUNTIME_ENV ?? resolve(targetRepo, "..", ".config", "spec-design-agent", "runtime.env"),
+    process.env.SPEC_DESIGN_AGENT_RUNTIME_ENV ??
+    resolve(targetRepo, "..", ".config", "spec-design-agent", "runtime.env"),
   specDesignTimeoutMs: Number(process.env.SPEC_DESIGN_AGENT_TIMEOUT_MS ?? "900000"),
   // Intent-backlog uses its dedicated access token. Product repositories use
   // short-lived, repository-scoped GitHub App installation tokens.

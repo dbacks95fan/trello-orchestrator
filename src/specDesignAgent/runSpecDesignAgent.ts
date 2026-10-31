@@ -74,12 +74,18 @@ export interface DockerRunSpec {
  *  commit cannot fail for want of one. Any `-c` flag the agent passes wins over
  *  these, so they are a floor, not an override. */
 const GIT_ENV: string[] = [
-  "-e", "GIT_CONFIG_KEY_0=safe.directory",
-  "-e", `GIT_CONFIG_VALUE_0=${CONTAINER_WORKSPACE}`,
-  "-e", "GIT_CONFIG_KEY_1=user.email",
-  "-e", "GIT_CONFIG_VALUE_1=agent@agentic-sdlc.local",
-  "-e", "GIT_CONFIG_KEY_2=user.name",
-  "-e", "GIT_CONFIG_VALUE_2=Spec and Design Agent",
+  "-e",
+  "GIT_CONFIG_KEY_0=safe.directory",
+  "-e",
+  `GIT_CONFIG_VALUE_0=${CONTAINER_WORKSPACE}`,
+  "-e",
+  "GIT_CONFIG_KEY_1=user.email",
+  "-e",
+  "GIT_CONFIG_VALUE_1=agent@agentic-sdlc.local",
+  "-e",
+  "GIT_CONFIG_KEY_2=user.name",
+  "-e",
+  "GIT_CONFIG_VALUE_2=Spec and Design Agent",
 ];
 
 /** Builds the `docker run` argv up to and including the image. Mirrors the
@@ -121,7 +127,12 @@ export function buildDockerArgs(spec: DockerRunSpec): string[] {
 
 /** Parses the single JSON result document the agent prints to stdout. Anything
  *  else (a crash, a stack trace) leaves `result` null with the raw streams kept. */
-export function parseAgentResult(stdout: string, stderr: string, exitCode: number | null, timedOut = false): SpecDesignResult {
+export function parseAgentResult(
+  stdout: string,
+  stderr: string,
+  exitCode: number | null,
+  timedOut = false,
+): SpecDesignResult {
   let result: Record<string, unknown> | null = null;
   const trimmed = stdout.trim();
   if (trimmed) {
@@ -193,7 +204,10 @@ export async function runSpecDesignAgent(
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
-      spawn(docker[0], [...docker.slice(1), "kill", `spec-design-${request.runId}`], { stdio: "ignore" }).on("error", () => undefined);
+      spawn(docker[0], [...docker.slice(1), "kill", `spec-design-${request.runId}`], { stdio: "ignore" }).on(
+        "error",
+        () => undefined,
+      );
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
@@ -231,8 +245,19 @@ async function runLocalSpecDesignAgent(
   await writeFile(requestPath, JSON.stringify(request, null, 2), "utf8");
   const command = options.localCommand ?? [config.specDesignUvBin];
   const runtimeEnvFile = options.envFile === undefined ? config.specDesignRuntimeEnvFile : options.envFile;
-  const uvEnvArgs = runtimeEnvFile && /^uv(?:\.exe)?$/i.test(basename(command[0])) ? ["--env-file", runtimeEnvFile] : [];
-  const args = [...command.slice(1), "run", ...uvEnvArgs, "spec-design-agent", "spec", "--request", requestPath, "--provider", provider];
+  const uvEnvArgs =
+    runtimeEnvFile && /^uv(?:\.exe)?$/i.test(basename(command[0])) ? ["--env-file", runtimeEnvFile] : [];
+  const args = [
+    ...command.slice(1),
+    "run",
+    ...uvEnvArgs,
+    "spec-design-agent",
+    "spec",
+    "--request",
+    requestPath,
+    "--provider",
+    provider,
+  ];
   return new Promise((resolvePromise) => {
     const child = spawn(command[0], args, {
       cwd: options.agentDirectory ?? config.specDesignAgentDirectory,

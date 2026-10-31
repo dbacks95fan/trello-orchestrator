@@ -110,17 +110,23 @@ let activeWorkflowListIds: WorkflowListIds | null = null;
 export async function getWorkflowListIds(product: ProductBoardConfig): Promise<WorkflowListIds> {
   const boardId = await resolveBoardId();
   if (product.trello_board_id !== boardId) {
-    throw new Error(`ProductConfig board ${product.trello_board_id} does not match the configured Trello board ${boardId}.`);
+    throw new Error(
+      `ProductConfig board ${product.trello_board_id} does not match the configured Trello board ${boardId}.`,
+    );
   }
   const ids = Object.values(product.trello_lists);
   if (ids.some((id) => typeof id !== "string" || id.length === 0)) {
     throw new Error("ProductConfig must map every canonical workflow stage to a non-empty Trello list ID.");
   }
-  if (new Set(ids).size !== ids.length) throw new Error("ProductConfig trello_lists must map each canonical stage to a distinct Trello list ID.");
+  if (new Set(ids).size !== ids.length)
+    throw new Error("ProductConfig trello_lists must map each canonical stage to a distinct Trello list ID.");
   const lists = await getLists(true);
   const listIdsOnBoard = new Set(lists.map((list) => list.id));
   const missingIds = ids.filter((id) => !listIdsOnBoard.has(id));
-  if (missingIds.length > 0) throw new Error(`ProductConfig contains Trello list IDs that are not on board ${boardId}: ${missingIds.join(", ")}.`);
+  if (missingIds.length > 0)
+    throw new Error(
+      `ProductConfig contains Trello list IDs that are not on board ${boardId}: ${missingIds.join(", ")}.`,
+    );
   const configured: WorkflowListIds = {
     newIdeas: product.trello_lists.new_ideas,
     backlog: product.trello_lists.backlog,
@@ -139,7 +145,8 @@ export async function getWorkflowListIds(product: ProductBoardConfig): Promise<W
 
 /** Returns the current product board's validated list ID for a canonical stage. */
 export function getWorkflowListId(stage: keyof WorkflowListIds): string {
-  if (!activeWorkflowListIds) throw new Error("No ProductConfig 1.1 workflow list mapping has been validated for this board.");
+  if (!activeWorkflowListIds)
+    throw new Error("No ProductConfig 1.1 workflow list mapping has been validated for this board.");
   return activeWorkflowListIds[stage];
 }
 

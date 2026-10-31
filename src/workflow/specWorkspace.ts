@@ -6,13 +6,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+// Run Git without a shell so an intent id can never alter the command structure.
 const execFileAsync = promisify(execFile);
 
-// Run Git without a shell so an intent id can never alter the command structure.
-async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, windowsHide: true });
-  return stdout.trim();
-}
 export interface PrepareSpecWorkspaceInput {
   targetRepository: string;
   baseCommit: string;
@@ -67,17 +63,39 @@ export async function prepareSpecWorkspace(input: PrepareSpecWorkspaceInput): Pr
   await writeFile(policyProfilePath, input.frozenPolicyProfileBytes);
 
   const frozenArtifactSha256 = createHash("sha256").update(input.frozenIntentBytes).digest("hex");
-  return { path, repositoryPath, branch, baseCommit: input.baseCommit, frozenArtifactSha256, remoteUrl, created: !existed };
+  return {
+    path,
+    repositoryPath,
+    branch,
+    baseCommit: input.baseCommit,
+    frozenArtifactSha256,
+    remoteUrl,
+    created: !existed,
+  };
 }
 
 /** Read only a committed work artifact so worker working-tree changes cannot masquerade as a published output. */
-export async function readCommittedWorkspaceFile(workspacePath: string, revision: string, relativePath: string): Promise<string> {
+export async function readCommittedWorkspaceFile(
+  workspacePath: string,
+  revision: string,
+  relativePath: string,
+): Promise<string> {
   const absolutePath = resolve(workspacePath, relativePath);
   const workspaceRelative = relative(workspacePath, absolutePath);
-  if (!/^[0-9a-f]{40,64}$/.test(revision) || !relativePath || isAbsolute(relativePath) || workspaceRelative === ".." || workspaceRelative.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+  if (
+    !/^[0-9a-f]{40,64}$/.test(revision) ||
+    !relativePath ||
+    isAbsolute(relativePath) ||
+    workspaceRelative === ".." ||
+    workspaceRelative.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+  ) {
     throw new Error("Worker artifact path must be a safe workspace-relative path.");
   }
-  const { stdout } = await execFileAsync("git", ["show", `${revision}:${relativePath.replace(/\\/g, "/")}`], { cwd: workspacePath, windowsHide: true, encoding: "utf8" });
+  const { stdout } = await execFileAsync("git", ["show", `${revision}:${relativePath.replace(/\\/g, "/")}`], {
+    cwd: workspacePath,
+    windowsHide: true,
+    encoding: "utf8",
+  });
   return stdout;
 }
 
@@ -93,9 +111,15 @@ export async function verifySpecBranchPublished(
   token: string,
 ): Promise<VerifySpecBranchResult> {
   const branchUrl = `${workspace.remoteUrl.replace(/\.git$/, "")}/tree/${workspace.branch}`;
-  const authHeader = token ? `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}` : undefined;
+  const authHeader = token
+    ? `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`
+    : undefined;
   const authEnv = authHeader
-    ? { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: authHeader }
+    ? {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+        GIT_CONFIG_VALUE_0: authHeader,
+      }
     : {};
   try {
     const { stdout } = await execFileAsync("git", ["ls-remote", "--heads", "origin", workspace.branch], {

@@ -12,8 +12,21 @@ export interface WorkContract {
   required_validation: string[];
   non_goals?: string[];
   constraints?: string[];
-  intent: { path: string; revision: string; sha256: string; reviewUrl: string; status: "Accepted"; acceptedBy: string; acceptedAt: string };
-  board: { provider: "trello"; workItemId: string; workItemUrl: string; workItemType: "User Story" | "Feature" | "Epic" | "Technical Enabler" };
+  intent: {
+    path: string;
+    revision: string;
+    sha256: string;
+    reviewUrl: string;
+    status: "Accepted";
+    acceptedBy: string;
+    acceptedAt: string;
+  };
+  board: {
+    provider: "trello";
+    workItemId: string;
+    workItemUrl: string;
+    workItemType: "User Story" | "Feature" | "Epic" | "Technical Enabler";
+  };
 }
 
 export class CardParseError extends Error {}
@@ -47,11 +60,7 @@ function canonicalHeading(line: string): string | null {
 function looksLikeUnknownHeading(line: string): boolean {
   if (ALL_KNOWN_HEADINGS.has(line.toUpperCase())) return false; // handled elsewhere
   return (
-    line.length > 0 &&
-    line.length <= 40 &&
-    !line.startsWith("-") &&
-    line === line.toUpperCase() &&
-    /[A-Z]/.test(line)
+    line.length > 0 && line.length <= 40 && !line.startsWith("-") && line === line.toUpperCase() && /[A-Z]/.test(line)
   );
 }
 
@@ -109,14 +118,20 @@ function readAcceptedIntent(repoRoot: string, requestedPath: string, expectedWor
   const root = resolve(repoRoot);
   if (!path.startsWith(root + sep)) throw new CardParseError("Canonical intent path escapes TARGET_REPO.");
   let raw: string;
-  try { raw = readFileSync(path, "utf8"); } catch { throw new CardParseError(`Canonical intent file '${requestedPath}' is not available in TARGET_REPO.`); }
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    throw new CardParseError(`Canonical intent file '${requestedPath}' is not available in TARGET_REPO.`);
+  }
   const workItem = intentValue(raw, "Work ID");
   const status = intentValue(raw, "Status");
   const reviewUrl = intentValue(raw, "Review URL");
   const acceptedBy = intentValue(raw, "Accepted by");
   const acceptedAt = intentValue(raw, "Accepted at");
-  if (workItem !== expectedWorkItem) throw new CardParseError(`Intent Work ID '${workItem ?? "missing"}' does not match '${expectedWorkItem}'.`);
-  if (status !== "Accepted" || !reviewUrl || !acceptedBy || !acceptedAt) throw new CardParseError("Canonical intent is not accepted with complete review metadata.");
+  if (workItem !== expectedWorkItem)
+    throw new CardParseError(`Intent Work ID '${workItem ?? "missing"}' does not match '${expectedWorkItem}'.`);
+  if (status !== "Accepted" || !reviewUrl || !acceptedBy || !acceptedAt)
+    throw new CardParseError("Canonical intent is not accepted with complete review metadata.");
   const openDecisions = raw.match(/## Open decisions\s*\n([\s\S]*?)(?=\n## |$)/i)?.[1] ?? "";
   if (/^\s*-\s+.+$/m.test(openDecisions)) throw new CardParseError("Canonical intent has unresolved open decisions.");
   const relativePath = relative(root, path).replace(/\\/g, "/");
@@ -125,8 +140,18 @@ function readAcceptedIntent(repoRoot: string, requestedPath: string, expectedWor
     const tracked = execFileSync("git", ["show", `HEAD:${relativePath}`], { cwd: root, encoding: "utf8" });
     if (tracked !== raw) throw new Error("not pinned");
     revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-  } catch { throw new CardParseError("Canonical intent must be committed at the revision used for the Work Contract."); }
-  return { path: relativePath, revision, sha256: createHash("sha256").update(raw, "utf8").digest("hex"), reviewUrl, status: "Accepted" as const, acceptedBy, acceptedAt };
+  } catch {
+    throw new CardParseError("Canonical intent must be committed at the revision used for the Work Contract.");
+  }
+  return {
+    path: relativePath,
+    revision,
+    sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
+    reviewUrl,
+    status: "Accepted" as const,
+    acceptedBy,
+    acceptedAt,
+  };
 }
 
 export function contractFromCard(card: TrelloCard, repoRoot: string): WorkContract {
@@ -164,9 +189,18 @@ export function contractFromCard(card: TrelloCard, repoRoot: string): WorkContra
   const constraints = sections["CONSTRAINTS"] ?? [];
   const workItem = `TRELLO-${card.idShort}`;
   const intentPath = sections["CANONICAL INTENT PATH"]?.join(" ").trim();
-  if (!intentPath) throw new CardParseError(`Card "${card.name}" has no CANONICAL INTENT PATH — refusing to reconstruct intent from the card.`);
+  if (!intentPath)
+    throw new CardParseError(
+      `Card "${card.name}" has no CANONICAL INTENT PATH — refusing to reconstruct intent from the card.`,
+    );
   const intent = readAcceptedIntent(repoRoot, intentPath, workItem);
-  const workItemType = card.name.startsWith("[Epic]") ? "Epic" : card.name.startsWith("[Feature]") ? "Feature" : card.name.startsWith("[Enabler]") ? "Technical Enabler" : "User Story";
+  const workItemType = card.name.startsWith("[Epic]")
+    ? "Epic"
+    : card.name.startsWith("[Feature]")
+      ? "Feature"
+      : card.name.startsWith("[Enabler]")
+        ? "Technical Enabler"
+        : "User Story";
 
   return {
     schema_version: 2,

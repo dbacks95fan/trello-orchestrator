@@ -66,7 +66,12 @@ function request(workspaceSha: string, baseCommit: string): SpecDesignRequest {
       authorized_by: "Sobe",
       recorded_at: "2026-09-06T09:00:00.000Z",
     },
-    target: { repository: "https://github.com/example/mealflow", baseCommit, branch: "work/INT-MF-0042", workspace: "/work/repository" },
+    target: {
+      repository: "https://github.com/example/mealflow",
+      baseCommit,
+      branch: "work/INT-MF-0042",
+      workspace: "/work/repository",
+    },
     readPaths: ["."],
     writePaths: [".agent/work/INT-MF-0042"],
   };
@@ -136,7 +141,7 @@ test("surfaces a container crash as an unparseable result", async () => {
 });
 
 test("reports a mutated frozen intent as blocked", async () => {
-  const { dir, targetRepo, sha, baseCommit } = workspaceWithIntent();
+  const { dir, targetRepo, baseCommit } = workspaceWithIntent();
   process.env.FAKE_DOCKER_MODE = "spec_ready";
   process.env.FAKE_DOCKER_TARGET_REPO = targetRepo;
   try {
@@ -210,7 +215,12 @@ test("runs the local CLI with the request and selected provider, then removes th
     });
     assert.equal(run.exitCode, 0, run.rawStdout + run.rawStderr);
     assert.equal(run.result?.status, "spec_ready");
-    const logged = JSON.parse(readFileSync(logPath, "utf8")) as { args: string[]; request: SpecDesignRequest; provider: string; cwd: string };
+    const logged = JSON.parse(readFileSync(logPath, "utf8")) as {
+      args: string[];
+      request: SpecDesignRequest;
+      provider: string;
+      cwd: string;
+    };
     assert.equal(logged.provider, "codex");
     assert.equal(logged.cwd, dir);
     assert.equal(logged.args[logged.args.indexOf("--provider") + 1], "codex");

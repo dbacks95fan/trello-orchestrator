@@ -40,7 +40,10 @@ if (!fs.existsSync(path.join(repositoryRoot, ".git"))) {
   }
   cp.execFileSync("git", ["clone", "--no-hardlinks", "--no-checkout", targetRepo, repositoryRoot], { stdio: "pipe" });
   cp.execFileSync("git", ["checkout", "--detach", request.target.baseCommit], { cwd: repositoryRoot, stdio: "pipe" });
-  cp.execFileSync("git", ["checkout", "-b", request.target.branch, request.target.baseCommit], { cwd: repositoryRoot, stdio: "pipe" });
+  cp.execFileSync("git", ["checkout", "-b", request.target.branch, request.target.baseCommit], {
+    cwd: repositoryRoot,
+    stdio: "pipe",
+  });
 }
 
 const mode = process.env.FAKE_DOCKER_MODE || "spec_ready";
@@ -117,9 +120,20 @@ fs.writeFileSync(
 );
 fs.writeFileSync(path.join(repositoryRoot, workContractRelPath), "schema_version: 3\n");
 const git = (args) =>
-  cp.execFileSync("git", ["-c", "user.email=a@b.c", "-c", "user.name=Spec Agent", ...args], { cwd: repositoryRoot }).toString().trim();
+  cp
+    .execFileSync("git", ["-c", "user.email=a@b.c", "-c", "user.name=Spec Agent", ...args], { cwd: repositoryRoot })
+    .toString()
+    .trim();
 // Force-add only authorized outputs, matching the real agent's artifact contract.
-git(["add", "--force", "--", ".agent/work/" + request.workItem + "/intent.md", ".agent/work/" + request.workItem + "/policy-profile.md", specRelPath, workContractRelPath]);
+git([
+  "add",
+  "--force",
+  "--",
+  ".agent/work/" + request.workItem + "/intent.md",
+  ".agent/work/" + request.workItem + "/policy-profile.md",
+  specRelPath,
+  workContractRelPath,
+]);
 git(["commit", "-m", `spec: ${request.workItem}`]);
 const specCommit = git(["rev-parse", "HEAD"]);
 
@@ -130,9 +144,15 @@ process.stdout.write(
     summary: "Specification produced from the frozen intent.",
     specCommit,
     specPath: specRelPath,
-    specSha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(repositoryRoot, specRelPath))).digest("hex"),
+    specSha256: crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(path.join(repositoryRoot, specRelPath)))
+      .digest("hex"),
     specVersion: 1,
     workContractPath: workContractRelPath,
-    workContractSha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(repositoryRoot, workContractRelPath))).digest("hex"),
+    workContractSha256: crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(path.join(repositoryRoot, workContractRelPath)))
+      .digest("hex"),
   }),
 );

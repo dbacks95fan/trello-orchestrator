@@ -1,9 +1,23 @@
 import express from "express";
 import { config, webhookUrl } from "./config.js";
 import { createGitHubAppReadToken } from "./githubApp.js";
-import { ensureWebhook, getCard, getCardComments, getWorkflowListIds, resolveBoardId, commentOnCard, type TrelloCard } from "./trello/client.js";
+import {
+  ensureWebhook,
+  getCard,
+  getCardComments,
+  getWorkflowListIds,
+  resolveBoardId,
+  commentOnCard,
+  type TrelloCard,
+} from "./trello/client.js";
 import { verifyTrelloSignature } from "./trello/webhookVerify.js";
-import { handleCardFreezeRevocation, handleCardPrioritized, handleCardReadyForAgent, handleCardReviewForAgent, handleCardSpecAndDesign } from "./workflow/workflow.js";
+import {
+  handleCardFreezeRevocation,
+  handleCardPrioritized,
+  handleCardReadyForAgent,
+  handleCardReviewForAgent,
+  handleCardSpecAndDesign,
+} from "./workflow/workflow.js";
 import { createLifecycleValidator } from "./contracts/lifecycle.js";
 import { boardTransitionFromWebhook } from "./trello/webhookEvent.js";
 import { processBoardTransition } from "./workflow/boardTransition.js";
@@ -21,7 +35,11 @@ function parseMachineRecord(text: string, kind: "stage-invocation" | "stage-resu
   if (!text.startsWith(marker)) return null;
   const end = text.indexOf(" -->");
   if (end < 0) return null;
-  try { return JSON.parse(text.slice(marker.length, end)); } catch { return null; }
+  try {
+    return JSON.parse(text.slice(marker.length, end));
+  } catch {
+    return null;
+  }
 }
 
 function validatorRecord(definition: "StageInvocation" | "StageResult", value: unknown): boolean {
@@ -90,7 +108,11 @@ app.post("/webhooks/trello", async (req, res) => {
     },
     getWorkflowListIds,
     dispatch: async (action, transition, card) => {
-      const approval = { approvedBy: transition.actor_id, approvedAt: transition.occurred_at, eventId: transition.event_id };
+      const approval = {
+        approvedBy: transition.actor_id,
+        approvedAt: transition.occurred_at,
+        eventId: transition.event_id,
+      };
       switch (action) {
         case "activate_freeze":
           await handleCardPrioritized(card.id, approval);
@@ -101,8 +123,7 @@ app.post("/webhooks/trello", async (req, res) => {
         case "start_spec_design":
           handleCardSpecAndDesign(card.id, approval);
           return;
-        case "accept_spec":
-          {
+        case "accept_spec": {
           const productConfig = await (async () => {
             const resolved = await resolveSpecRequest(card, {
               githubApiBase: config.intentBacklogApiBase,
@@ -114,8 +135,11 @@ app.post("/webhooks/trello", async (req, res) => {
           })();
           const comments = await getCardComments(card.id);
           const freeze = activeFreezeForCard(card);
-          const records = comments.map((comment) => parseHumanRecordComment(comment.data?.text ?? ""))
-            .filter((value): value is { definition: string; record: unknown } => value?.definition === "SpecAcceptanceRecord");
+          const records = comments
+            .map((comment) => parseHumanRecordComment(comment.data?.text ?? ""))
+            .filter(
+              (value): value is { definition: string; record: unknown } => value?.definition === "SpecAcceptanceRecord",
+            );
           let accepted = false;
           let acceptedRecord: Record<string, unknown> | null = null;
           let acceptedFreezeActivation: Record<string, unknown> | null = null;
@@ -132,18 +156,38 @@ app.post("/webhooks/trello", async (req, res) => {
               if (!stageResult || !validatorRecord("StageResult", stageResult)) continue;
               const result = stageResult as Record<string, unknown>;
               const item = result.work_item as Record<string, unknown>;
-              if (result.stage !== "spec_design" || result.status !== "spec_ready" || item.trello_card_id !== card.id || item.product_id !== freeze?.tuple.productId || item.intent_id !== freeze?.tuple.intentId || item.intent_version !== freeze?.tuple.intentVersion) continue;
+              if (
+                result.stage !== "spec_design" ||
+                result.status !== "spec_ready" ||
+                item.trello_card_id !== card.id ||
+                item.product_id !== freeze?.tuple.productId ||
+                item.intent_id !== freeze?.tuple.intentId ||
+                item.intent_version !== freeze?.tuple.intentVersion
+              )
+                continue;
               const outputs = result.output_artifacts as Array<Record<string, unknown>>;
-              const expectedSpec = outputs.find((artifact) => String(artifact.path).endsWith("/spec.md") || artifact.path === "spec.md");
-              const expectedWorkContract = outputs.find((artifact) => String(artifact.path).endsWith("/work-contract.yaml") || artifact.path === "work-contract.yaml");
-              if (!expectedSpec || !expectedWorkContract || !sameArtifactReference(acceptedSpec, expectedSpec) || !sameArtifactReference(acceptedContract, expectedWorkContract)) continue;
+              const expectedSpec = outputs.find(
+                (artifact) => String(artifact.path).endsWith("/spec.md") || artifact.path === "spec.md",
+              );
+              const expectedWorkContract = outputs.find(
+                (artifact) =>
+                  String(artifact.path).endsWith("/work-contract.yaml") || artifact.path === "work-contract.yaml",
+              );
+              if (
+                !expectedSpec ||
+                !expectedWorkContract ||
+                !sameArtifactReference(acceptedSpec, expectedSpec) ||
+                !sameArtifactReference(acceptedContract, expectedWorkContract)
+              )
+                continue;
               const invocation = comments
                 .map((entry) => parseMachineRecord(entry.data?.text ?? "", "stage-invocation"))
                 .find((entry) => entry && (entry as Record<string, unknown>).invocation_id === result.invocation_id);
               if (!invocation || !validatorRecord("StageInvocation", invocation)) continue;
               const invocationItem = (invocation as Record<string, unknown>).work_item as Record<string, unknown>;
               const target = (invocation as Record<string, unknown>).target as Record<string, unknown>;
-              if (invocationItem.trello_card_id !== card.id || invocationItem.intent_id !== freeze?.tuple.intentId) continue;
+              if (invocationItem.trello_card_id !== card.id || invocationItem.intent_id !== freeze?.tuple.intentId)
+                continue;
               foundStageOutput = true;
               const productRepositoryReadToken = await createGitHubAppReadToken({
                 appId: config.orchestratorGithubAppId,
@@ -168,7 +212,10 @@ app.post("/webhooks/trello", async (req, res) => {
               if (issues.length === 0) {
                 accepted = true;
                 acceptedRecord = candidate.record as Record<string, unknown>;
-                acceptedFreezeActivation = (invocation as Record<string, unknown>).freeze_activation as Record<string, unknown>;
+                acceptedFreezeActivation = (invocation as Record<string, unknown>).freeze_activation as Record<
+                  string,
+                  unknown
+                >;
                 acceptedWorkspaceRef = String((invocation as Record<string, unknown>).workspace_ref);
                 acceptedTargetCommit = String(target.commit_sha);
                 break;
@@ -176,20 +223,31 @@ app.post("/webhooks/trello", async (req, res) => {
               rejection = issues.join("; ");
             }
             if (accepted) break;
-            if (!foundStageOutput && !rejection.includes("not match")) rejection = "The acceptance references do not match a validated spec_ready StageResult and StageInvocation.";
+            if (!foundStageOutput && !rejection.includes("not match"))
+              rejection =
+                "The acceptance references do not match a validated spec_ready StageResult and StageInvocation.";
           }
           if (!accepted) {
             await commentOnCard(card.id, `Execution was not started: ${rejection}`);
             return;
           }
-          handleCardReadyForAgent(card.id, acceptedRecord!, acceptedWorkspaceRef, acceptedTargetCommit, acceptedFreezeActivation!);
+          handleCardReadyForAgent(
+            card.id,
+            acceptedRecord!,
+            acceptedWorkspaceRef,
+            acceptedTargetCommit,
+            acceptedFreezeActivation!,
+          );
           return;
-          }
+        }
         case "start_evaluation":
           handleCardReviewForAgent(card.id);
           return;
         default:
-          await commentOnCard(card.id, `${action} was recorded as a board transition. This Orchestrator build does not automate that human-controlled downstream action.`);
+          await commentOnCard(
+            card.id,
+            `${action} was recorded as a board transition. This Orchestrator build does not automate that human-controlled downstream action.`,
+          );
       }
     },
   });

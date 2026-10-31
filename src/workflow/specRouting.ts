@@ -90,7 +90,9 @@ export function routeSpecResult(run: SpecDesignResult): SpecRoute {
   }
 
   if (status === "needs_decision") {
-    const decisions = Array.isArray(result.humanDecisions) ? (result.humanDecisions as Array<Record<string, unknown>>) : [];
+    const decisions = Array.isArray(result.humanDecisions)
+      ? (result.humanDecisions as Array<Record<string, unknown>>)
+      : [];
     const rendered = decisions
       .map((decision, index) => {
         const lines = [
