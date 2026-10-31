@@ -141,7 +141,7 @@ test("surfaces a container crash as an unparseable result", async () => {
 });
 
 test("reports a mutated frozen intent as blocked", async () => {
-  const { dir, targetRepo, sha, baseCommit } = workspaceWithIntent();
+  const { dir, targetRepo, baseCommit } = workspaceWithIntent();
   process.env.FAKE_DOCKER_MODE = "spec_ready";
   process.env.FAKE_DOCKER_TARGET_REPO = targetRepo;
   try {

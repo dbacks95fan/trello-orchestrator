@@ -1,7 +1,6 @@
 // Copyright (c) 2026 DPSystems, LLC.
 // ABOUTME: Stands in for the local Spec & Design CLI in Orchestrator integration tests.
 const fs = require("node:fs");
-const path = require("node:path");
 const requestIndex = process.argv.indexOf("--request");
 const requestPath = requestIndex >= 0 ? process.argv[requestIndex + 1] : "";
 const request = requestPath ? JSON.parse(fs.readFileSync(requestPath, "utf8")) : null;

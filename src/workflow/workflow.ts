@@ -218,7 +218,6 @@ async function processCard(execution: AcceptedExecution): Promise<void> {
 }
 
 async function evaluateCard(cardId: string): Promise<void> {
-  const card = await getCard(cardId);
   const { getCardComments } = await import("../trello/client.js");
   const comments = await getCardComments(cardId);
   const handoffComment = comments.find((comment) => comment.data.text?.startsWith(handoffMarker));

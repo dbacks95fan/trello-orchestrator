@@ -158,7 +158,6 @@ export async function validateSpecAcceptanceRecord(options: SpecAcceptanceValida
     .replace(/\.git$/, "")
     .replace(/\/$/, "")
     .toLowerCase();
-  const contractTarget = (contract as Record<string, unknown>)?.target as Record<string, unknown> | undefined;
   const issues = validateWorkContractV3(
     contract,
     {

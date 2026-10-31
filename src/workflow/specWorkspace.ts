@@ -6,13 +6,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+// Run Git without a shell so an intent id can never alter the command structure.
 const execFileAsync = promisify(execFile);
 
-// Run Git without a shell so an intent id can never alter the command structure.
-async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, windowsHide: true });
-  return stdout.trim();
-}
 export interface PrepareSpecWorkspaceInput {
   targetRepository: string;
   baseCommit: string;
