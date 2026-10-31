@@ -19,7 +19,7 @@ for any product board, but simultaneous multi-board processing is not supported.
 | --- | --- |
 | Backlog → Prioritized | Validate the pinned intent/profile and product-owner ID; record schema-valid freeze activation data and the current projection. |
 | Prioritized → Spec & Design | Verify the active freeze, record a StageInvocation, and invoke Spec & Design. Only a schema-valid Work Contract v3 bound to frozen inputs can be reported ready for human review. |
-| Spec & Design → Execution | Require a product-owner `SpecAcceptanceRecord` comment on the card; retrieve the referenced spec and Work Contract from GitHub, verify hashes, and validate Work Contract v3 against the active freeze. |
+| Spec & Design → Execution | The product owner's move is the acceptance. Build the `SpecAcceptanceRecord` from that move and the latest `spec_ready` result, retrieve the referenced spec and Work Contract from GitHub, verify hashes, validate Work Contract v3 against the active freeze, and record it on the card. |
 | Execution (entry) | Build StageInvocation 1.1 from the accepted artifacts and submit it to the Coding Agent service on the NAS. Validate its StageResult and Evidence Package, record the Evaluator handoff, and move a `candidate_complete` card to Evaluation. |
 | Evaluation (entry) | Call the NAS Evaluator with the candidate SHA and the exact contract, evidence, and intent bytes. Validate the returned Evaluation Package reference and move a `pass` to Human Approval. `fail` and `needs_decision` stay in Evaluation. |
 | Human Approval and later | Check in-order movement and product-owner identity only. Human Approval, Release, Production Observation, and Done records are not yet validated. |
@@ -71,7 +71,8 @@ src/
 │   ├── specWorkspace.ts           stages frozen intent/profile snapshots in an invocation bundle
 │   ├── specRouting.ts             Spec & Design result -> card comment + decision brief
 │   ├── workContractV3.ts          checks a proposed Work Contract v3 against the active freeze
-│   ├── humanRecords.ts            parses and verifies SpecAcceptanceRecord comments
+│   ├── specAcceptance.ts          builds the SpecAcceptanceRecord from the owner's move to Execution
+│   ├── humanRecords.ts            verifies a SpecAcceptanceRecord against the freeze and GitHub artifact bytes
 │   ├── acceptedExecutionContract.ts  revalidates acceptance and builds the Execution StageInvocation
 │   ├── codingContractAdapter.ts   checks accepted validation names/commands against the supported gates
 │   └── contractFromCard.ts        Work Contract type shared by the adapter
@@ -197,9 +198,11 @@ records remain manual and are not enforced by this build.
    a schema-valid StageInvocation and invokes the Spec & Design Agent. Its
    schema-valid StageResult must include committed `spec.md` and Work Contract v3
    references, or the Orchestrator blocks the handoff.
-5. Moving to Execution requires a product-owner SpecAcceptanceRecord. The
-   Orchestrator checks its schema, authorization, work identity, immutable artifact
-   hashes, StageResult references, Work Contract v3 fields, and target revision.
+5. A product owner's move to Execution accepts the spec. The Orchestrator builds
+   the SpecAcceptanceRecord from that move and the newest Spec & Design result,
+   which must be `spec_ready`, checks its schema, authorization, work identity,
+   immutable artifact hashes, Work Contract v3 fields, and target revision, and
+   records it on the card before starting the Coding Agent.
 6. The Orchestrator accepts only validation names and commands that exactly
    match its fixed list in `src/workflow/codingContractAdapter.ts` (`build`,
    `automated_tests`, `playwright`, `docker_build`). The Coding Agent separately

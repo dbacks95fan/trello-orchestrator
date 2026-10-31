@@ -35,6 +35,8 @@ export interface TrelloCard {
 
 export interface TrelloComment {
   id: string;
+  /** ISO time Trello recorded the comment action. */
+  date?: string;
   data: { text?: string };
 }
 

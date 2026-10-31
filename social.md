@@ -149,3 +149,12 @@ Decisions:
   failures are tolerated and logged before the outcome is reported as unknown.
 - **A lost run is unknown, not failed.** The service keeps results in memory; a
   `404` while polling means it restarted, so the card is held for triage.
+Later on 2026-10-31: the Spec Acceptance Record is now written by the Orchestrator,
+not pasted by hand. Per agentic-sdlc Stage Contracts §3, the product owner's move
+from Spec & Design to Execution is the acceptance; `specAcceptance.ts` binds that
+move (actor, time) to the newest `spec_ready` artifacts and records it.
+
+- **Only the newest Spec & Design result counts.** If a later run was blocked or
+  failed, an earlier ready spec is not silently accepted.
+- **The hand-written record path was removed** rather than kept alongside, so
+  there is one way to accept a spec.
