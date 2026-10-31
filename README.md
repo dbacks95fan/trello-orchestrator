@@ -225,6 +225,7 @@ records remain manual and are not enforced by this build.
 npm install
 npm run build
 cp .env.example .env   # fill in Trello credentials, TRELLO_BOARD_ID, and CALLBACK_URL
+npm run check          # typecheck, ESLint, Prettier check, tests, build
 ```
 
 You need a public HTTPS URL for `CALLBACK_URL` before starting — Trello's
