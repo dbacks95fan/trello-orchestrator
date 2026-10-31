@@ -22,36 +22,13 @@ import { createLifecycleValidator } from "./contracts/lifecycle.js";
 import { boardTransitionFromWebhook } from "./trello/webhookEvent.js";
 import { processBoardTransition } from "./workflow/boardTransition.js";
 import { resolveSpecRequest } from "./workflow/specRequestFromCard.js";
-import { parseHumanRecordComment, validateSpecAcceptanceRecord } from "./workflow/humanRecords.js";
-import { activeFreezeForCard } from "./workflow/freezeState.js";
+import { validateSpecAcceptanceRecord } from "./workflow/humanRecords.js";
+import { recordSpecAcceptance, specAcceptanceComment } from "./workflow/specAcceptance.js";
 
 const lifecycleValidator = createLifecycleValidator(config.lifecycleSchemaPath);
 let configuredBoardId = "";
 
 const app = express();
-
-function parseMachineRecord(text: string, kind: "stage-invocation" | "stage-result"): unknown | null {
-  const marker = `<!-- agentic-sdlc-${kind} `;
-  if (!text.startsWith(marker)) return null;
-  const end = text.indexOf(" -->");
-  if (end < 0) return null;
-  try {
-    return JSON.parse(text.slice(marker.length, end));
-  } catch {
-    return null;
-  }
-}
-
-function validatorRecord(definition: "StageInvocation" | "StageResult", value: unknown): boolean {
-  return lifecycleValidator.validate(definition, value).valid;
-}
-
-function sameArtifactReference(left: unknown, right: unknown): boolean {
-  if (!left || typeof left !== "object" || !right || typeof right !== "object") return false;
-  const a = left as Record<string, unknown>;
-  const b = right as Record<string, unknown>;
-  return a.repository === b.repository && a.commit_sha === b.commit_sha && a.path === b.path && a.sha256 === b.sha256;
-}
 
 // Trello signs over the exact raw bytes of the request body — capture them
 // before any JSON parsing/re-serialization would alter whitespace/key order.
@@ -133,110 +110,44 @@ app.post("/webhooks/trello", async (req, res) => {
             });
             return resolved.productConfig;
           })();
-          const comments = await getCardComments(card.id);
-          const freeze = activeFreezeForCard(card);
-          const records = comments
-            .map((comment) => parseHumanRecordComment(comment.data?.text ?? ""))
-            .filter(
-              (value): value is { definition: string; record: unknown } => value?.definition === "SpecAcceptanceRecord",
-            );
-          let accepted = false;
-          let acceptedRecord: Record<string, unknown> | null = null;
-          let acceptedFreezeActivation: Record<string, unknown> | null = null;
-          let acceptedWorkspaceRef = "";
-          let acceptedTargetCommit = "";
-          let rejection = "No SpecAcceptanceRecord comment was found.";
-          for (const candidate of records) {
-            const acceptance = candidate.record as Record<string, unknown>;
-            const acceptedSpec = acceptance?.spec;
-            const acceptedContract = acceptance?.work_contract;
-            let foundStageOutput = false;
-            for (const comment of comments) {
-              const stageResult = parseMachineRecord(comment.data?.text ?? "", "stage-result");
-              if (!stageResult || !validatorRecord("StageResult", stageResult)) continue;
-              const result = stageResult as Record<string, unknown>;
-              const item = result.work_item as Record<string, unknown>;
-              if (
-                result.stage !== "spec_design" ||
-                result.status !== "spec_ready" ||
-                item.trello_card_id !== card.id ||
-                item.product_id !== freeze?.tuple.productId ||
-                item.intent_id !== freeze?.tuple.intentId ||
-                item.intent_version !== freeze?.tuple.intentVersion
-              )
-                continue;
-              const outputs = result.output_artifacts as Array<Record<string, unknown>>;
-              const expectedSpec = outputs.find(
-                (artifact) => String(artifact.path).endsWith("/spec.md") || artifact.path === "spec.md",
-              );
-              const expectedWorkContract = outputs.find(
-                (artifact) =>
-                  String(artifact.path).endsWith("/work-contract.yaml") || artifact.path === "work-contract.yaml",
-              );
-              if (
-                !expectedSpec ||
-                !expectedWorkContract ||
-                !sameArtifactReference(acceptedSpec, expectedSpec) ||
-                !sameArtifactReference(acceptedContract, expectedWorkContract)
-              )
-                continue;
-              const invocation = comments
-                .map((entry) => parseMachineRecord(entry.data?.text ?? "", "stage-invocation"))
-                .find((entry) => entry && (entry as Record<string, unknown>).invocation_id === result.invocation_id);
-              if (!invocation || !validatorRecord("StageInvocation", invocation)) continue;
-              const invocationItem = (invocation as Record<string, unknown>).work_item as Record<string, unknown>;
-              const target = (invocation as Record<string, unknown>).target as Record<string, unknown>;
-              if (invocationItem.trello_card_id !== card.id || invocationItem.intent_id !== freeze?.tuple.intentId)
-                continue;
-              foundStageOutput = true;
-              const productRepositoryReadToken = await createGitHubAppReadToken({
-                appId: config.orchestratorGithubAppId,
-                installationId: config.orchestratorGithubAppInstallationId,
-                privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
-                repositoryUrl: productConfig.target_repository,
-              });
-              const issues = await validateSpecAcceptanceRecord({
+          const outcome = await recordSpecAcceptance({
+            card,
+            comments: await getCardComments(card.id),
+            actorId: transition.actor_id,
+            recordedAt: transition.occurred_at,
+            validator: lifecycleValidator,
+            verify: async (check) =>
+              validateSpecAcceptanceRecord({
                 card,
                 actorId: transition.actor_id,
-                record: candidate.record,
+                record: check.record,
                 validator: lifecycleValidator,
                 productConfig,
-                expectedSpec,
-                expectedWorkContract,
-                expectedTargetCommit: String(target.commit_sha ?? ""),
+                expectedSpec: check.expectedSpec,
+                expectedWorkContract: check.expectedWorkContract,
+                expectedTargetCommit: check.expectedTargetCommit,
                 githubApiBase: config.intentBacklogApiBase,
                 intentBacklogReadToken: config.intentBacklogReadToken,
-                productRepositoryReadToken,
+                productRepositoryReadToken: await createGitHubAppReadToken({
+                  appId: config.orchestratorGithubAppId,
+                  installationId: config.orchestratorGithubAppInstallationId,
+                  privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
+                  repositoryUrl: productConfig.target_repository,
+                }),
                 resolveIntent: resolveSpecRequest,
-              });
-              if (issues.length === 0) {
-                accepted = true;
-                acceptedRecord = candidate.record as Record<string, unknown>;
-                acceptedFreezeActivation = (invocation as Record<string, unknown>).freeze_activation as Record<
-                  string,
-                  unknown
-                >;
-                acceptedWorkspaceRef = String((invocation as Record<string, unknown>).workspace_ref);
-                acceptedTargetCommit = String(target.commit_sha);
-                break;
-              }
-              rejection = issues.join("; ");
-            }
-            if (accepted) break;
-            if (!foundStageOutput && !rejection.includes("not match"))
-              rejection =
-                "The acceptance references do not match a validated spec_ready StageResult and StageInvocation.";
-          }
-          if (!accepted) {
-            await commentOnCard(card.id, `Execution was not started: ${rejection}`);
+              }),
+          });
+          if (!outcome.accepted) {
+            await commentOnCard(card.id, `Execution was not started: ${outcome.reason}`);
             return;
           }
+          await commentOnCard(card.id, specAcceptanceComment(outcome.record));
           handleCardReadyForAgent(
             card.id,
-            acceptedRecord!,
-            acceptedWorkspaceRef,
-            acceptedTargetCommit,
-            acceptedFreezeActivation!,
+            outcome.record,
+            outcome.workspaceRef,
+            outcome.targetCommit,
+            outcome.freezeActivation,
           );
           return;
         }

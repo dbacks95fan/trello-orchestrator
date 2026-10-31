@@ -12,18 +12,19 @@ For Spec & Design, the Orchestrator also stores the schema-validated `StageInvoc
 
 ## Spec Acceptance
 
-Moving a card from `Spec & Design` to `Execution` requires a valid `SpecAcceptanceRecord`. The card remains in place unless all checks pass:
+The product owner accepts `spec.md` and the proposed Work Contract by moving the card from `Spec & Design` to `Execution`. The move is the decision; nobody writes a record by hand. The Orchestrator then builds the `SpecAcceptanceRecord` itself, with `authorized_by` set to the Trello member who moved the card, `recorded_at` set to the time of the move, and `spec` and `work_contract` set to the artifact references in the latest `spec_ready` StageResult. It posts the record on the card as an `agentic-sdlc-human-record` comment, then starts Execution.
 
-- The Trello actor is an authorized product owner and is the `authorized_by` identity in the record.
-- `work_item` matches the card and the active Prioritized freeze.
-- `spec` and `work_contract` identify the same GitHub repository and commit.
-- The Orchestrator retrieves both artifacts from GitHub and verifies their SHA-256 hashes.
-- The references match the latest validated `spec_ready` StageResult, whose `StageInvocation` supplies the target base revision.
+Execution does not start, and the card holds for resolution, unless every check passes:
+
+- The card has an active Prioritized freeze.
+- The newest Spec & Design StageResult on the card is `spec_ready`. An older ready spec cannot be accepted after a later run was blocked, failed, or needs a decision.
+- That result belongs to the active freeze's product, intent, and version, references both `spec.md` and `work-contract.yaml`, and has a valid StageInvocation, which supplies the target base revision.
+- The Trello actor is an authorized product owner in the pinned `product.yaml`.
+- `spec` and `work_contract` identify the same GitHub repository and commit, and the Orchestrator retrieves both from GitHub and verifies their SHA-256 hashes.
 - `work-contract.yaml` validates as Work Contract v3 and binds the same product, intent, version, frozen intent/profile references, and product repository.
-
 After that gate passes, the Orchestrator checks the accepted contract's `required_validation` and sends the Coding Agent a StageInvocation 1.1 for the accepted work branch. The check accepts only these exact supported pairs: `build` / `npm run build`, `automated_tests` / `npm run test:server`, `playwright` / `npm run test:e2e`, and `docker_build` / `docker build -t coding-agent-validation:latest .`. Unsupported names or command differences hold the card in Execution for resolution.
 
-Example shape (replace all sample values with actual immutable references and hashes):
+A recorded Spec Acceptance Record looks like this, with sample values:
 
 ```json
 {
