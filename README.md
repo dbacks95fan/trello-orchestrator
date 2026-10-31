@@ -20,7 +20,7 @@ for any product board, but simultaneous multi-board processing is not supported.
 | Backlog → Prioritized | Validate the pinned intent/profile and product-owner ID; record schema-valid freeze activation data and the current projection. |
 | Prioritized → Spec & Design | Verify the active freeze, record a StageInvocation, and invoke Spec & Design. Only a schema-valid Work Contract v3 bound to frozen inputs can be reported ready for human review. |
 | Spec & Design → Execution | Require a product-owner `SpecAcceptanceRecord` comment on the card; retrieve the referenced spec and Work Contract from GitHub, verify hashes, and validate Work Contract v3 against the active freeze. |
-| Execution (entry) | Build StageInvocation 1.1 from the accepted artifacts and run the Coding Agent. Validate its StageResult and Evidence Package, record the Evaluator handoff, and move a `candidate_complete` card to Evaluation. |
+| Execution (entry) | Build StageInvocation 1.1 from the accepted artifacts and submit it to the Coding Agent service on the NAS. Validate its StageResult and Evidence Package, record the Evaluator handoff, and move a `candidate_complete` card to Evaluation. |
 | Evaluation (entry) | Call the NAS Evaluator with the candidate SHA and the exact contract, evidence, and intent bytes. Validate the returned Evaluation Package reference and move a `pass` to Human Approval. `fail` and `needs_decision` stay in Evaluation. |
 | Human Approval and later | Check in-order movement and product-owner identity only. Human Approval, Release, Production Observation, and Done records are not yet validated. |
 
@@ -76,7 +76,7 @@ src/
 │   ├── codingContractAdapter.ts   checks accepted validation names/commands against the supported gates
 │   └── contractFromCard.ts        Work Contract type shared by the adapter
 ├── codingAgent/
-│   └── runCodingAgent.ts          runs the Coding Agent's `run --invocation` command as a subprocess
+│   └── runCodingAgent.ts          submits to the NAS Coding Agent service and polls for its result
 ├── specDesignAgent/
 │   └── runSpecDesignAgent.ts      runs the spec-design-agent image as a one-shot container
 └── evaluatorAgent/
@@ -197,8 +197,12 @@ records remain manual and are not enforced by this build.
 6. The Orchestrator accepts only validation names and commands that exactly
    match its fixed list in `src/workflow/codingContractAdapter.ts` (`build`,
    `automated_tests`, `playwright`, `docker_build`). The Coding Agent separately
-   checks them against its own operator manifest. The Orchestrator then sends a StageInvocation 1.1 targeting
-   the accepted spec commit on `work/<intent-id>` to the Coding Agent.
+   checks them against its own operator manifest. The Orchestrator then POSTs a
+   StageInvocation 1.1 targeting the accepted spec commit on `work/<intent-id>`
+   to `CODING_AGENT_API_URL/invocations` with the `CODING_AGENT_API_TOKEN`
+   bearer token, and polls `/invocations/{id}` until the run is done. A
+   rejected token, busy service, timeout, or lost run leaves the card in
+   Execution with a comment for human triage.
 7. The Coding Agent commits and pushes the candidate and its Evidence Package
    itself. For a `candidate_complete` result, the Orchestrator validates the
    StageResult and Evidence Package against the canonical schema and writes the
@@ -243,10 +247,13 @@ On startup it resolves the board's real id, and calls Trello's webhook API to
 create (or reuse, if one already exists for this exact callback URL) the
 subscription — idempotent, safe to restart.
 
+Set `CODING_AGENT_API_URL` to the NAS Coding Agent address (port 8081) and
+`CODING_AGENT_API_TOKEN` to the same bearer token configured by that service.
 Set `EVALUATOR_API_URL` to the NAS evaluator address and `EVALUATOR_API_TOKEN`
-to the same bearer token configured by the evaluator. Store the bearer token in
+to the same bearer token configured by the evaluator. Store both bearer tokens in
 the Orchestrator's `C:\Repos\.config\orchestrator\runtime.env` file, not in a
-repository. Set `ORCHESTRATOR_SECRETS_FILE` only if you use another location.
+repository. The Orchestrator never holds the Coding Agent's model key or GitHub
+credentials. Set `ORCHESTRATOR_SECRETS_FILE` only if you use another location.
 The Orchestrator runtime file also needs `ORCHESTRATOR_GITHUB_APP_ID`,
 `ORCHESTRATOR_GITHUB_APP_INSTALLATION_ID`, and
 `ORCHESTRATOR_GITHUB_APP_PRIVATE_KEY_FILE`. Keep the private key in the

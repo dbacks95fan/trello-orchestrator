@@ -131,3 +131,21 @@ usable remote. So this was never a networking change.
 A test caught a UX defect worth noting: with no origin at all, `git config --get`
 exits non-zero, so the cryptic "Command failed" surfaced instead of the
 actionable message. Now tolerated and reported properly.
+
+## 2026-10-31
+
+Sobe decided the Coding Agent runs only as the authenticated HTTP service on the
+NAS, using Claude through the API, never as a local CLI. `runCodingAgent.ts` now
+POSTs the Execution StageInvocation 1.1 to `CODING_AGENT_API_URL/invocations`
+with `CODING_AGENT_API_TOKEN` and polls `/invocations/{id}`. `CODING_AGENT_CLI`
+and `CODING_AGENT_RUNTIME_ENV` are gone, so the Orchestrator no longer loads the
+Coding Agent's model key or GitHub credentials to start it.
+
+Decisions:
+
+- **Busy is not retried.** A second submission while the service is busy could
+  collide with whatever else is running, so `409` is reported for a human.
+- **Status polls are retried.** A poll is a read, so up to three consecutive
+  failures are tolerated and logged before the outcome is reported as unknown.
+- **A lost run is unknown, not failed.** The service keeps results in memory; a
+  `404` while polling means it restarted, so the card is held for triage.

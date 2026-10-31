@@ -139,9 +139,14 @@ async function processCard(execution: AcceptedExecution): Promise<void> {
   const workItemId = String(invocationWorkItem.intent_id ?? "");
   await commentOnCard(cardId, `🤖 Coding Agent started (work item \`${workItemId}\`).`);
 
-  const coding = await runCodingAgent(invocation, { runtimeEnvFile: config.codingAgentRuntimeEnvFile });
+  const coding = await runCodingAgent(invocation, {
+    endpoint: config.codingAgentApiUrl,
+    token: config.codingAgentApiToken,
+    pollIntervalMs: config.codingAgentPollIntervalMs,
+    timeoutMs: config.codingAgentTimeoutMs,
+  });
   if (!coding.stageResult) {
-    await commentOnCard(cardId, `❌ Coding Agent produced no parseable StageResult (exit code ${coding.exitCode}). Needs human investigation.\n\n${coding.rawOutput.slice(-1500)}`);
+    await commentOnCard(cardId, `❌ Coding Agent produced no parseable StageResult: ${coding.error ?? "the finished run had no stage_result"}. Needs human investigation.\n\n${coding.rawOutput.slice(-1500)}`);
     return;
   }
 

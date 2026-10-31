@@ -30,9 +30,12 @@ export const config = {
   lifecycleSchemaPath:
     process.env.AGENTIC_SDLC_SCHEMA_PATH ?? resolve(targetRepo, "..", "agentic-sdlc", "schemas", "lifecycle-contracts.schema.json"),
   wipLimit: Number(process.env.WIP_LIMIT ?? "1"),
-  codingAgentCli: required("CODING_AGENT_CLI"),
-  codingAgentRuntimeEnvFile:
-    process.env.CODING_AGENT_RUNTIME_ENV ?? resolve(targetRepo, "..", ".config", "coding-agent", "runtime.env"),
+  // The Coding Agent runs as an authenticated HTTP service on the NAS; the
+  // Orchestrator holds only its API token, never the agent's own credentials.
+  codingAgentApiUrl: required("CODING_AGENT_API_URL"),
+  codingAgentApiToken: required("CODING_AGENT_API_TOKEN"),
+  codingAgentPollIntervalMs: Number(process.env.CODING_AGENT_POLL_INTERVAL_MS ?? "15000"),
+  codingAgentTimeoutMs: Number(process.env.CODING_AGENT_TIMEOUT_MS ?? "3600000"),
   // The Spec & Design Agent runs as a one-shot Docker container on this host.
   // The image is built and deployed separately (spec-design-agent/compose.yaml);
   // the orchestrator only invokes `docker run` against it.
