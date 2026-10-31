@@ -121,6 +121,8 @@ engineering-stage handler for that work item:
    ```
    docker run --rm --mount type=bind,source=<invocation-bundle>,target=/work \
      --mount type=bind,source=<invocation-bundle>/.agent/inputs/<invocation-id>,target=/work/.agent/inputs/<invocation-id>,readonly \
+     --mount type=bind,source=<check-manifest>,target=/config/check-manifest.json,readonly \
+     -e SPEC_AGENT_CHECK_MANIFEST=/config/check-manifest.json \
      --read-only --tmpfs /tmp -e HOME=/tmp -e SPEC_AGENT_PROVIDER=<provider> \
      -e GIT_CONFIG_COUNT=3 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/work \
      -e GIT_CONFIG_KEY_1=user.email -e GIT_CONFIG_KEY_2=user.name ... \
@@ -128,7 +130,11 @@ engineering-stage handler for that work item:
      --env-file <runtime.env> <image> spec --request /work/spec-design-request.json
    ```
 
-   The flags mirror the hardening in `spec-design-agent/compose.yaml`. The
+   `<check-manifest>` is `SPEC_DESIGN_CHECK_MANIFEST`, by default the Coding
+   Agent's operator manifest at `../coding-agent/config/manifest.json`. The
+   Spec & Design Agent copies that repository's checks into the Work
+   Contract's `required_validation`, so a contract can only name checks the
+   Coding Agent will run. The flags mirror the hardening in `spec-design-agent/compose.yaml`. The
    request's `target.workspace` is `/work/repository`, not the host path, because
    the agent clones the product repository there. A run that overruns
    `SPEC_DESIGN_AGENT_TIMEOUT_MS` is killed and reported as a timeout.

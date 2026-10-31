@@ -212,6 +212,7 @@ test("runs the local CLI with the request and selected provider, then removes th
       localCommand: [process.execPath, FAKE_LOCAL_AGENT],
       agentDirectory: dir,
       provider: "codex",
+      checkManifestPath: "C:/Repos/coding-agent/config/manifest.json",
     });
     assert.equal(run.exitCode, 0, run.rawStdout + run.rawStderr);
     assert.equal(run.result?.status, "spec_ready");
@@ -219,9 +220,11 @@ test("runs the local CLI with the request and selected provider, then removes th
       args: string[];
       request: SpecDesignRequest;
       provider: string;
+      checkManifest: string;
       cwd: string;
     };
     assert.equal(logged.provider, "codex");
+    assert.equal(logged.checkManifest, "C:/Repos/coding-agent/config/manifest.json");
     assert.equal(logged.cwd, dir);
     assert.equal(logged.args[logged.args.indexOf("--provider") + 1], "codex");
     assert.equal(logged.request.workItem, "INT-MF-0042");

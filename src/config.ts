@@ -53,6 +53,10 @@ export const config = {
     process.env.SPEC_DESIGN_AGENT_RUNTIME_ENV ??
     resolve(targetRepo, "..", ".config", "spec-design-agent", "runtime.env"),
   specDesignTimeoutMs: Number(process.env.SPEC_DESIGN_AGENT_TIMEOUT_MS ?? "900000"),
+  // The Coding Agent's operator check manifest, mounted read-only into the Spec &
+  // Design Agent so its Work Contract names only checks the Coding Agent will run.
+  specDesignCheckManifest:
+    process.env.SPEC_DESIGN_CHECK_MANIFEST ?? resolve(targetRepo, "..", "coding-agent", "config", "manifest.json"),
   // Intent-backlog uses its dedicated access token. Product repositories use
   // short-lived, repository-scoped GitHub App installation tokens.
   intentBacklogReadToken: process.env.INTENT_BACKLOG_READ_TOKEN ?? "",

@@ -11,6 +11,7 @@ if (process.env.FAKE_LOCAL_SPEC_LOG) {
       args: process.argv.slice(2),
       request,
       provider: process.env.SPEC_AGENT_PROVIDER,
+      checkManifest: process.env.SPEC_AGENT_CHECK_MANIFEST,
       cwd: process.cwd(),
     }),
   );
