@@ -1,0 +1,5 @@
+dist/
+node_modules/
+package-lock.json
+# Prose follows the house no-wrap rule and is not formatted.
+*.md

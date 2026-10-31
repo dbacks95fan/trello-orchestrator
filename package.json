@@ -6,6 +6,11 @@
   "scripts": {
     "test": "node --import tsx --test src/*.test.ts src/**/*.test.ts",
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
     "bootstrap-board": "tsx src/boardBootstrapCli.ts",
     "spec-design:manual": "tsx src/manualSpecDesignCli.ts",
     "start": "node dist/server.js",
@@ -23,9 +28,13 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
     "@types/node": "^26.4.0",
+    "eslint": "^10.14.0",
+    "prettier": "^3.9.10",
     "tsx": "^4.23.12",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1"
   }
 }
