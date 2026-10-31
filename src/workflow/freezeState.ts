@@ -43,7 +43,9 @@ export function readFreezeProjection(desc: string): FreezeProjection | null {
 export function writeFreezeProjection(desc: string, projection: FreezeProjection): string {
   const marker = `${MARKER}${JSON.stringify(projection)} -->`;
   const withoutMarker = desc.replace(/\n?<!-- agentic-sdlc-freeze-state [\s\S]*? -->\n?/g, "\n").trimEnd();
-  return withoutMarker ? `${withoutMarker}\n\nFreeze State: ${projection.state}\n${marker}` : `Freeze State: ${projection.state}\n${marker}`;
+  return withoutMarker
+    ? `${withoutMarker}\n\nFreeze State: ${projection.state}\n${marker}`
+    : `Freeze State: ${projection.state}\n${marker}`;
 }
 
 export function activeFreezeForCard(card: TrelloCard): FreezeProjection | null {

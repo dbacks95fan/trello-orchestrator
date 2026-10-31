@@ -20,21 +20,24 @@ const backlogUrl = "https://github.com/example/intent-backlog";
 const intentCommit = "a".repeat(40);
 const intentHashProjection = "d".repeat(64);
 const profile = "Profile ID: MF-DEFAULT\nVersion: 1\n";
-const frozenIntent = Buffer.from([
-  "---",
-  `intent_id: ${intentId}`,
-  "product_id: MF",
-  "intent_version: 3",
-  `intent_hash: sha256:${intentHashProjection}`,
-  "policy_profile_id: MF-DEFAULT",
-  "policy_profile_version: 1",
-  "status: Frozen",
-  "---",
-  "",
-  "# Meal planning intent",
-  "",
-].join("\n"));
-const specText = "# Spec\n\n## Outcome and scope\nA person can create a weekly meal plan.\n\n## Acceptance criteria\n- The plan can be saved.\n";
+const frozenIntent = Buffer.from(
+  [
+    "---",
+    `intent_id: ${intentId}`,
+    "product_id: MF",
+    "intent_version: 3",
+    `intent_hash: sha256:${intentHashProjection}`,
+    "policy_profile_id: MF-DEFAULT",
+    "policy_profile_version: 1",
+    "status: Frozen",
+    "---",
+    "",
+    "# Meal planning intent",
+    "",
+  ].join("\n"),
+);
+const specText =
+  "# Spec\n\n## Outcome and scope\nA person can create a weekly meal plan.\n\n## Acceptance criteria\n- The plan can be saved.\n";
 
 function git(dir: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd: dir, encoding: "utf8", stdio: "pipe" }).trim();
@@ -65,10 +68,20 @@ test("loads accepted immutable artifacts and adapts them against the accepted wo
     const workContractV3 = {
       schema_version: 3,
       work_item: { product_id: "MF", intent_id: intentId, intent_version: 3, trello_card_id: "card-1" },
-      intent: { repository: backlogUrl, commit_sha: intentCommit, path: `products/mealflow/intents/${intentId}/intent.md`, sha256: digest(frozenIntent) },
+      intent: {
+        repository: backlogUrl,
+        commit_sha: intentCommit,
+        path: `products/mealflow/intents/${intentId}/intent.md`,
+        sha256: digest(frozenIntent),
+      },
       policy_profile_id: "MF-DEFAULT",
       policy_profile_version: "1",
-      policy_profile: { repository: backlogUrl, commit_sha: intentCommit, path: "products/mealflow/policy-profiles/default.md", sha256: digest(profile) },
+      policy_profile: {
+        repository: backlogUrl,
+        commit_sha: intentCommit,
+        path: "products/mealflow/policy-profiles/default.md",
+        sha256: digest(profile),
+      },
       target: { repository: productUrl, commit_sha: baseCommit },
       acceptance_criteria: ["The person can plan the week.", "The plan can be saved."],
       permitted_scope: { included: ["Weekly planning"], excluded: ["Export"] },
@@ -93,25 +106,54 @@ test("loads accepted immutable artifacts and adapts them against the accepted wo
       authorized_by: "owner-1",
       recorded_at: "2026-10-27T12:00:00.000Z",
       spec: { repository: productUrl, commit_sha: artifactCommit, path: specPath, sha256: digest(specText) },
-      work_contract: { repository: productUrl, commit_sha: artifactCommit, path: workContractPath, sha256: digest(contractText) },
+      work_contract: {
+        repository: productUrl,
+        commit_sha: artifactCommit,
+        path: workContractPath,
+        sha256: digest(contractText),
+      },
     };
     const card: TrelloCard = {
-      id: "card-1", idBoard: "board-1", idShort: 1, name: "[Feature] Weekly plan", desc: [
-        "Product: MealFlow (MF)", `Intent ID: ${intentId}`, "Intent Version: 3", `Intent Commit: ${intentCommit}`,
-        `Intent Hash: sha256:${intentHashProjection}`, "Policy Profile ID: MF-DEFAULT", "Policy Profile Version: 1",
+      id: "card-1",
+      idBoard: "board-1",
+      idShort: 1,
+      name: "[Feature] Weekly plan",
+      desc: [
+        "Product: MealFlow (MF)",
+        `Intent ID: ${intentId}`,
+        "Intent Version: 3",
+        `Intent Commit: ${intentCommit}`,
+        `Intent Hash: sha256:${intentHashProjection}`,
+        "Policy Profile ID: MF-DEFAULT",
+        "Policy Profile Version: 1",
         `Canonical intent: ${backlogUrl}/blob/${intentCommit}/products/mealflow/intents/${intentId}/intent.md`,
-      ].join("\n"), idList: "execution", shortLink: "abc", url: "https://trello.com/c/abc",
+      ].join("\n"),
+      idList: "execution",
+      shortLink: "abc",
+      url: "https://trello.com/c/abc",
     };
     card.desc = writeFreezeProjection(card.desc, {
       state: "Active",
       tuple: {
-        productId: "MF", intentId, intentVersion: 3, intentCommit, intentSha256: digest(frozenIntent),
-        policyProfileId: "MF-DEFAULT", policyProfileVersion: "1", policyProfileCommit: intentCommit,
-        policyProfileSha256: digest(profile), cardId: card.id, freezeEventId: "freeze-event-1", authorizedBy: "owner-1", frozenAt: "2026-10-27T11:00:00.000Z",
+        productId: "MF",
+        intentId,
+        intentVersion: 3,
+        intentCommit,
+        intentSha256: digest(frozenIntent),
+        policyProfileId: "MF-DEFAULT",
+        policyProfileVersion: "1",
+        policyProfileCommit: intentCommit,
+        policyProfileSha256: digest(profile),
+        cardId: card.id,
+        freezeEventId: "freeze-event-1",
+        authorizedBy: "owner-1",
+        frozenAt: "2026-10-27T11:00:00.000Z",
       },
     });
     const yaml = (value: string) => value;
-    const productYaml = yaml(`schema_version: "1.1"\nproduct_id: MF\nproduct_name: MealFlow\ntrello_board_id: board-1\ntrello_lists:\n  new_ideas: list-new\n  backlog: list-backlog\n  prioritized: list-prioritized\n  spec_design: list-spec\n  execution: list-execution\n  evaluation: list-evaluation\n  human_approval: list-human-approval\n  release: list-release\n  production_observation: list-observation\n  done: list-done\ntarget_repository: ${productUrl}\nauthorized_product_owner_ids:\n  - owner-1\npolicy_profiles:\n  MF-DEFAULT: policy-profiles/default.md\n`);
+    const productYaml = yaml(
+      `schema_version: "1.1"\nproduct_id: MF\nproduct_name: MealFlow\ntrello_board_id: board-1\ntrello_lists:\n  new_ideas: list-new\n  backlog: list-backlog\n  prioritized: list-prioritized\n  spec_design: list-spec\n  execution: list-execution\n  evaluation: list-evaluation\n  human_approval: list-human-approval\n  release: list-release\n  production_observation: list-observation\n  done: list-done\ntarget_repository: ${productUrl}\nauthorized_product_owner_ids:\n  - owner-1\npolicy_profiles:\n  MF-DEFAULT: policy-profiles/default.md\n`,
+    );
     const fetchFn: typeof fetch = async (input) => {
       const url = String(input);
       if (url.includes("product.yaml?")) return new Response(productYaml);
@@ -123,18 +165,40 @@ test("loads accepted immutable artifacts and adapts them against the accepted wo
     };
 
     const freezeActivation = {
-      schema_version: "1.0", event_id: "freeze-event-1", event_type: "activated",
+      schema_version: "1.0",
+      event_id: "freeze-event-1",
+      event_type: "activated",
       work_item: { product_id: "MF", intent_id: intentId, intent_version: 3, trello_card_id: "card-1" },
-      intent: { repository: backlogUrl, commit_sha: intentCommit, path: `products/mealflow/intents/${intentId}/intent.md`, sha256: digest(frozenIntent) },
-      policy_profile_id: "MF-DEFAULT", policy_profile_version: "1",
-      policy_profile: { repository: backlogUrl, commit_sha: intentCommit, path: "products/mealflow/policy-profiles/default.md", sha256: digest(profile) },
-      authorized_by: "owner-1", recorded_at: "2026-10-27T11:00:00.000Z",
+      intent: {
+        repository: backlogUrl,
+        commit_sha: intentCommit,
+        path: `products/mealflow/intents/${intentId}/intent.md`,
+        sha256: digest(frozenIntent),
+      },
+      policy_profile_id: "MF-DEFAULT",
+      policy_profile_version: "1",
+      policy_profile: {
+        repository: backlogUrl,
+        commit_sha: intentCommit,
+        path: "products/mealflow/policy-profiles/default.md",
+        sha256: digest(profile),
+      },
+      authorized_by: "owner-1",
+      recorded_at: "2026-10-27T11:00:00.000Z",
     };
     const result = await loadAcceptedExecutionContract({
-      card, acceptance: record, workspaceRef, targetCommit: baseCommit, workspaceRoot,
-      intentBacklogApiBase: "https://api.github.com", intentBacklogReadToken: "", createProductRepositoryReadToken: async () => "test-product-read-token", validator: createLifecycleValidator(config.lifecycleSchemaPath),
+      card,
+      acceptance: record,
+      workspaceRef,
+      targetCommit: baseCommit,
+      workspaceRoot,
+      intentBacklogApiBase: "https://api.github.com",
+      intentBacklogReadToken: "",
+      createProductRepositoryReadToken: async () => "test-product-read-token",
+      validator: createLifecycleValidator(config.lifecycleSchemaPath),
       freezeActivation,
-      fetchFn, targetRepositoryUrl: productUrl,
+      fetchFn,
+      targetRepositoryUrl: productUrl,
     });
     assert.equal(result.workContract.schema_version, 2);
     assert.equal(result.workContract.work_item, `${intentId}-v3`);

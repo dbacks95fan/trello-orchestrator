@@ -30,9 +30,14 @@ export interface BoardBootstrapResult extends BoardBootstrapPlan {
 export class BoardBootstrapError extends Error {}
 
 /** Produces a non-mutating reconciliation plan for one board and one lifecycle template. */
-export function planBoardBootstrap(lists: readonly BoardList[], canonicalListNames: readonly string[]): BoardBootstrapPlan {
+export function planBoardBootstrap(
+  lists: readonly BoardList[],
+  canonicalListNames: readonly string[],
+): BoardBootstrapPlan {
   const names = lists.map((list) => list.name);
-  const duplicateListNames = names.filter((name, index) => names.indexOf(name) !== index).filter((name, index, all) => all.indexOf(name) === index);
+  const duplicateListNames = names
+    .filter((name, index) => names.indexOf(name) !== index)
+    .filter((name, index, all) => all.indexOf(name) === index);
   const canonicalNames = new Set(canonicalListNames);
   const missingListNames = canonicalListNames.filter((name) => !names.includes(name));
   const unexpectedListNames = names.filter((name) => !canonicalNames.has(name));
@@ -48,7 +53,9 @@ export function planBoardBootstrap(lists: readonly BoardList[], canonicalListNam
 }
 
 function hasCanonicalOrder(lists: readonly BoardList[], canonicalListNames: readonly string[]): boolean {
-  return lists.length === canonicalListNames.length && lists.every((list, index) => list.name === canonicalListNames[index]);
+  return (
+    lists.length === canonicalListNames.length && lists.every((list, index) => list.name === canonicalListNames[index])
+  );
 }
 
 /** Applies a reviewed plan only when every existing list has an unambiguous template mapping. */

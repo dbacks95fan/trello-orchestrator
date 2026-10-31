@@ -85,28 +85,55 @@ test("validates freeze audit, stage invocation, and correlated stage result reco
     sha256: "b".repeat(64),
   };
   const freezeActivation = {
-    schema_version: "1.0", event_id: "trello-action-1", event_type: "activated", work_item: workItem,
-    intent: artifact, policy_profile_id: "MF-DEFAULT", policy_profile_version: "1", policy_profile: { ...artifact, path: "products/mealflow/policy-profiles/default.md" },
-    authorized_by: "owner-1", recorded_at: "2026-10-26T12:00:00.000Z",
+    schema_version: "1.0",
+    event_id: "trello-action-1",
+    event_type: "activated",
+    work_item: workItem,
+    intent: artifact,
+    policy_profile_id: "MF-DEFAULT",
+    policy_profile_version: "1",
+    policy_profile: { ...artifact, path: "products/mealflow/policy-profiles/default.md" },
+    authorized_by: "owner-1",
+    recorded_at: "2026-10-26T12:00:00.000Z",
   };
   const freeze = validator.validate("FreezeActivationEvent", freezeActivation);
   assert.equal(freeze.valid, true, freeze.errors.join("; "));
 
   const invocation = validator.validate("StageInvocation", {
-    schema_version: "1.1", invocation_id: "invocation-1", trigger_event_id: "trello-action-2", stage: "spec_design", work_item: workItem,
-    freeze_activation: freezeActivation, input_artifacts: [], target: { repository: "https://github.com/example/mealflow", commit_sha: "c".repeat(40) },
-    workspace_ref: "work/INT-MF-0042", read_paths: ["."], write_paths: [".agent/work/INT-MF-0042"],
+    schema_version: "1.1",
+    invocation_id: "invocation-1",
+    trigger_event_id: "trello-action-2",
+    stage: "spec_design",
+    work_item: workItem,
+    freeze_activation: freezeActivation,
+    input_artifacts: [],
+    target: { repository: "https://github.com/example/mealflow", commit_sha: "c".repeat(40) },
+    workspace_ref: "work/INT-MF-0042",
+    read_paths: ["."],
+    write_paths: [".agent/work/INT-MF-0042"],
   });
   assert.equal(invocation.valid, true, invocation.errors.join("; "));
   const legacyInvocation = validator.validate("StageInvocation", {
-    schema_version: "1.0", invocation_id: "invocation-1", trigger_event_id: "trello-action-2", stage: "spec_design", work_item: workItem,
-    input_artifacts: [artifact], target: { repository: "https://github.com/example/mealflow", commit_sha: "c".repeat(40) },
-    workspace_ref: "work/INT-MF-0042", read_paths: ["."], write_paths: [".agent/work/INT-MF-0042"],
+    schema_version: "1.0",
+    invocation_id: "invocation-1",
+    trigger_event_id: "trello-action-2",
+    stage: "spec_design",
+    work_item: workItem,
+    input_artifacts: [artifact],
+    target: { repository: "https://github.com/example/mealflow", commit_sha: "c".repeat(40) },
+    workspace_ref: "work/INT-MF-0042",
+    read_paths: ["."],
+    write_paths: [".agent/work/INT-MF-0042"],
   });
   assert.equal(legacyInvocation.valid, false);
   const result = validator.validate("StageResult", {
-    schema_version: "1.0", invocation_id: "invocation-1", stage: "spec_design", work_item: workItem,
-    status: "blocked", output_artifacts: [], summary: "The worker did not emit a Work Contract v3 reference.",
+    schema_version: "1.0",
+    invocation_id: "invocation-1",
+    stage: "spec_design",
+    work_item: workItem,
+    status: "blocked",
+    output_artifacts: [],
+    summary: "The worker did not emit a Work Contract v3 reference.",
   });
   assert.equal(result.valid, true, result.errors.join("; "));
 });

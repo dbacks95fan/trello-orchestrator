@@ -31,7 +31,13 @@ function intentMarkdown(overrides: Record<string, string> = {}): string {
     frozen_at: "2026-08-01T12:00:00.000Z",
     ...overrides,
   };
-  return "---\n" + Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join("\n") + "\n---\n\n# Intent: Meal planner\n";
+  return (
+    "---\n" +
+    Object.entries(fm)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n") +
+    "\n---\n\n# Intent: Meal planner\n"
+  );
 }
 
 function card(desc: string): TrelloCard {
@@ -70,7 +76,11 @@ function description(overrides: Record<string, string> = {}): string {
 function stubFetch(body: string, init: ResponseInit = { status: 200 }): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/product.yaml?")) return new Response('schema_version: "1.1"\nproduct_id: MF\nproduct_name: MealFlow\ntrello_board_id: board-1\ntrello_lists:\n  new_ideas: list-new\n  backlog: list-backlog\n  prioritized: list-prioritized\n  spec_design: list-spec\n  execution: list-execution\n  evaluation: list-evaluation\n  human_approval: list-human-approval\n  release: list-release\n  production_observation: list-observation\n  done: list-done\ntarget_repository: https://github.com/example/mealflow\nauthorized_product_owner_ids:\n  - owner-1\npolicy_profiles:\n  MF-DEFAULT: policy-profiles/default.md\n', init);
+    if (url.includes("/product.yaml?"))
+      return new Response(
+        'schema_version: "1.1"\nproduct_id: MF\nproduct_name: MealFlow\ntrello_board_id: board-1\ntrello_lists:\n  new_ideas: list-new\n  backlog: list-backlog\n  prioritized: list-prioritized\n  spec_design: list-spec\n  execution: list-execution\n  evaluation: list-evaluation\n  human_approval: list-human-approval\n  release: list-release\n  production_observation: list-observation\n  done: list-done\ntarget_repository: https://github.com/example/mealflow\nauthorized_product_owner_ids:\n  - owner-1\npolicy_profiles:\n  MF-DEFAULT: policy-profiles/default.md\n',
+        init,
+      );
     if (url.includes("/policy-profiles/default.md?")) return new Response(PROFILE, init);
     return new Response(body, init);
   }) as typeof fetch;
@@ -100,8 +110,14 @@ test("parseCardIntentMetadata tolerates markdown bold labels and bullets", () =>
 });
 
 test("parseCardIntentMetadata rejects a card missing projected metadata", () => {
-  const desc = description().split("\n").filter((line) => !line.startsWith("Intent ID:")).join("\n");
-  assert.throws(() => parseCardIntentMetadata(card(desc)), (err: Error) => err instanceof SpecRequestError && /Intent ID/.test(err.message));
+  const desc = description()
+    .split("\n")
+    .filter((line) => !line.startsWith("Intent ID:"))
+    .join("\n");
+  assert.throws(
+    () => parseCardIntentMetadata(card(desc)),
+    (err: Error) => err instanceof SpecRequestError && /Intent ID/.test(err.message),
+  );
 });
 
 test("parseCardIntentMetadata leaves freeze authorization to the Orchestrator", () => {
@@ -113,7 +129,10 @@ test("parseCardIntentMetadata leaves freeze authorization to the Orchestrator", 
 });
 
 test("parseCardIntentMetadata accepts a card with no Intent Status at all", () => {
-  const desc = description().split("\n").filter((line) => !line.startsWith("Intent Status:")).join("\n");
+  const desc = description()
+    .split("\n")
+    .filter((line) => !line.startsWith("Intent Status:"))
+    .join("\n");
   const meta = parseCardIntentMetadata(card(desc));
   assert.equal(meta.intentStatus, "");
   assert.equal(meta.intentId, "INT-MF-0042");
@@ -165,19 +184,32 @@ test("resolveSpecRequest sends bearer auth and pins the ref to the card commit",
     return stubFetch(intentMarkdown())(url, init);
   }) as unknown as typeof fetch;
 
-  await resolveSpecRequest(card(description()), { ...baseOptions, intentBacklogReadToken: "read-only-intent-token", fetchFn });
-  assert.match(seenUrl, /\/repos\/dbacks95fan\/intent-backlog\/contents\/products\/mealflow\/intents\/INT-MF-0042\/intent\.md\?ref=a{40}$/);
+  await resolveSpecRequest(card(description()), {
+    ...baseOptions,
+    intentBacklogReadToken: "read-only-intent-token",
+    fetchFn,
+  });
+  assert.match(
+    seenUrl,
+    /\/repos\/dbacks95fan\/intent-backlog\/contents\/products\/mealflow\/intents\/INT-MF-0042\/intent\.md\?ref=a{40}$/,
+  );
   assert.equal(seenAuth, "Bearer read-only-intent-token");
 });
 
 test("resolveSpecRequest fails when the card and the canonical intent disagree", async () => {
   await assert.rejects(
-    resolveSpecRequest(card(description()), { ...baseOptions, fetchFn: stubFetch(intentMarkdown({ intent_id: "INT-MF-9999" })) }),
+    resolveSpecRequest(card(description()), {
+      ...baseOptions,
+      fetchFn: stubFetch(intentMarkdown({ intent_id: "INT-MF-9999" })),
+    }),
     (err: Error) => err instanceof SpecRequestError && /disagree/.test(err.message) && /intent_id/.test(err.message),
   );
 
   await assert.rejects(
-    resolveSpecRequest(card(description()), { ...baseOptions, fetchFn: stubFetch(intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })) }),
+    resolveSpecRequest(card(description()), {
+      ...baseOptions,
+      fetchFn: stubFetch(intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })),
+    }),
     (err: Error) => err instanceof SpecRequestError && /intent_hash/.test(err.message),
   );
 });
@@ -194,7 +226,8 @@ test("resolveSpecRequest warns but proceeds on a self-referential commit field",
 test("resolveSpecRequest surfaces a GitHub fetch failure as a SpecRequestError", async () => {
   await assert.rejects(
     resolveSpecRequest(card(description()), { ...baseOptions, fetchFn: stubFetch("Not Found", { status: 404 }) }),
-    (err: Error) => err instanceof SpecRequestError && /HTTP 404/.test(err.message) && /INTENT_BACKLOG_READ_TOKEN/.test(err.message),
+    (err: Error) =>
+      err instanceof SpecRequestError && /HTTP 404/.test(err.message) && /INTENT_BACKLOG_READ_TOKEN/.test(err.message),
   );
 });
 
@@ -217,9 +250,7 @@ test("parseCardIntentMetadata accepts an Intent Hash with no sha256: prefix", ()
 test("resolveSpecRequest reads legacy git_commit / content_hash frontmatter keys", async () => {
   // Existing backlog artifacts predate the canonical intent_commit / intent_hash
   // names; both spellings must reconcile against the same card.
-  const legacy = intentMarkdown()
-    .replace("intent_commit:", "git_commit:")
-    .replace("intent_hash:", "content_hash:");
+  const legacy = intentMarkdown().replace("intent_commit:", "git_commit:").replace("intent_hash:", "content_hash:");
   const resolved = await resolveSpecRequest(card(description()), {
     ...baseOptions,
     fetchFn: stubFetch(legacy),
@@ -260,11 +291,17 @@ test("resolveSpecRequest warns, but does not fail, when card and backlog status 
 test("identity and hash disagreements are still hard failures", async () => {
   // Relaxing the freeze gate must not relax integrity.
   await assert.rejects(
-    resolveSpecRequest(card(description()), { ...baseOptions, fetchFn: stubFetch(intentMarkdown({ intent_id: "INT-MF-9999" })) }),
+    resolveSpecRequest(card(description()), {
+      ...baseOptions,
+      fetchFn: stubFetch(intentMarkdown({ intent_id: "INT-MF-9999" })),
+    }),
     SpecRequestError,
   );
   await assert.rejects(
-    resolveSpecRequest(card(description()), { ...baseOptions, fetchFn: stubFetch(intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })) }),
+    resolveSpecRequest(card(description()), {
+      ...baseOptions,
+      fetchFn: stubFetch(intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })),
+    }),
     SpecRequestError,
   );
 });

@@ -38,7 +38,15 @@ test("prepareSpecWorkspace stages exact snapshots without creating or publishing
 
   try {
     const invocationId = "invocation-1";
-    const first = await prepareSpecWorkspace({ targetRepository: REMOTE_URL, baseCommit, workspaceRoot, intentId, invocationId, frozenIntentBytes, frozenPolicyProfileBytes: FROZEN_PROFILE });
+    const first = await prepareSpecWorkspace({
+      targetRepository: REMOTE_URL,
+      baseCommit,
+      workspaceRoot,
+      intentId,
+      invocationId,
+      frozenIntentBytes,
+      frozenPolicyProfileBytes: FROZEN_PROFILE,
+    });
 
     assert.equal(first.created, true);
     assert.equal(first.branch, "work/INT-MF-0042");
@@ -51,11 +59,22 @@ test("prepareSpecWorkspace stages exact snapshots without creating or publishing
     const intentFile = join(first.path, ".agent", "inputs", invocationId, "intent.md");
     assert.ok(existsSync(intentFile));
     assert.deepEqual(readFileSync(intentFile), frozenIntentBytes);
-    assert.deepEqual(readFileSync(join(first.path, ".agent", "inputs", invocationId, "policy-profile.md")), FROZEN_PROFILE);
+    assert.deepEqual(
+      readFileSync(join(first.path, ".agent", "inputs", invocationId, "policy-profile.md")),
+      FROZEN_PROFILE,
+    );
 
     assert.equal(first.remoteUrl, REMOTE_URL.replace(/\.git$/, ""));
 
-    const second = await prepareSpecWorkspace({ targetRepository: REMOTE_URL, baseCommit, workspaceRoot, intentId, invocationId, frozenIntentBytes, frozenPolicyProfileBytes: FROZEN_PROFILE });
+    const second = await prepareSpecWorkspace({
+      targetRepository: REMOTE_URL,
+      baseCommit,
+      workspaceRoot,
+      intentId,
+      invocationId,
+      frozenIntentBytes,
+      frozenPolicyProfileBytes: FROZEN_PROFILE,
+    });
     assert.equal(second.created, false);
     assert.equal(second.path, first.path);
     assert.equal(existsSync(join(second.path, ".git")), false);
@@ -73,14 +92,14 @@ test("prepareSpecWorkspace stages invocation inputs when the repo ignores .agent
   const workspaceRoot = mkdtempSync(join(tmpdir(), "spec-workspace-roots-"));
   try {
     const workspace = await prepareSpecWorkspace({
-        targetRepository: REMOTE_URL,
-        baseCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: targetRepo }).toString().trim(),
-        workspaceRoot,
-        intentId: "INT-MF-0042",
-        invocationId: "invocation-ignored-agent-dir",
-        frozenIntentBytes: Buffer.from("---\nintent_id: INT-MF-0042\n---\n"),
-        frozenPolicyProfileBytes: FROZEN_PROFILE,
-      });
+      targetRepository: REMOTE_URL,
+      baseCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: targetRepo }).toString().trim(),
+      workspaceRoot,
+      intentId: "INT-MF-0042",
+      invocationId: "invocation-ignored-agent-dir",
+      frozenIntentBytes: Buffer.from("---\nintent_id: INT-MF-0042\n---\n"),
+      frozenPolicyProfileBytes: FROZEN_PROFILE,
+    });
     assert.deepEqual(
       readFileSync(join(workspace.path, ".agent", "inputs", "invocation-ignored-agent-dir", "intent.md")),
       Buffer.from("---\nintent_id: INT-MF-0042\n---\n"),
@@ -129,10 +148,7 @@ test("verifySpecBranchPublished observes the agent-pushed branch without writing
     git("commit", "-qm", "spec");
     git("push", "--set-upstream", "origin", "work/INT-MF-0042");
 
-    const result = await verifySpecBranchPublished(
-      { path: work, branch: "work/INT-MF-0042", remoteUrl: bare },
-      "",
-    );
+    const result = await verifySpecBranchPublished({ path: work, branch: "work/INT-MF-0042", remoteUrl: bare }, "");
 
     assert.equal(result.pushed, true, String(result.reason ?? ""));
     assert.equal(result.branchUrl, `${bare}/tree/work/INT-MF-0042`);

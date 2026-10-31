@@ -92,7 +92,10 @@ async function runPipeline(targetRepo: string, workspaceRoot: string) {
     targetRepositoryUrl: "https://github.com/example/mealflow",
     fetchFn: (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/product.yaml?")) return new Response('schema_version: "1.1"\nproduct_id: MF\nproduct_name: MealFlow\ntrello_board_id: board-1\ntrello_lists:\n  new_ideas: list-new\n  backlog: list-backlog\n  prioritized: list-prioritized\n  spec_design: list-spec\n  execution: list-execution\n  evaluation: list-evaluation\n  human_approval: list-human-approval\n  release: list-release\n  production_observation: list-observation\n  done: list-done\ntarget_repository: https://github.com/example/mealflow\nauthorized_product_owner_ids:\n  - owner-1\npolicy_profiles:\n  MF-DEFAULT: policy-profiles/default.md\n');
+      if (url.includes("/product.yaml?"))
+        return new Response(
+          'schema_version: "1.1"\nproduct_id: MF\nproduct_name: MealFlow\ntrello_board_id: board-1\ntrello_lists:\n  new_ideas: list-new\n  backlog: list-backlog\n  prioritized: list-prioritized\n  spec_design: list-spec\n  execution: list-execution\n  evaluation: list-evaluation\n  human_approval: list-human-approval\n  release: list-release\n  production_observation: list-observation\n  done: list-done\ntarget_repository: https://github.com/example/mealflow\nauthorized_product_owner_ids:\n  - owner-1\npolicy_profiles:\n  MF-DEFAULT: policy-profiles/default.md\n',
+        );
       if (url.includes("/policy-profiles/default.md?")) return new Response(PROFILE);
       return new Response(intentMarkdown());
     }) as typeof fetch,
@@ -179,7 +182,10 @@ test("card -> frozen intent/profile -> clone -> container -> human review", asyn
     assert.match(route.comment, /\.agent\/work\/INT-MF-0042\/spec\.md/);
 
     assert.ok(existsSync(join(workspace.repositoryPath, ".agent", "work", "INT-MF-0042", "spec.md")));
-    const log = execFileSync("git", ["log", "--oneline"], { cwd: workspace.repositoryPath }).toString().trim().split("\n");
+    const log = execFileSync("git", ["log", "--oneline"], { cwd: workspace.repositoryPath })
+      .toString()
+      .trim()
+      .split("\n");
     assert.match(log[0], /spec: INT-MF-0042/);
     assert.match(log[1], /initial/);
     assert.equal(

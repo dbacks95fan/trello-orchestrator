@@ -25,10 +25,12 @@ export function boardTransitionFromWebhook(payload: unknown): BoardTransitionEve
   if (a.type !== "updateCard") return null;
   const data = a.data && typeof a.data === "object" ? (a.data as Record<string, unknown>) : {};
   const card = data.card && typeof data.card === "object" ? (data.card as Record<string, unknown>) : {};
-  const before = data.listBefore && typeof data.listBefore === "object" ? (data.listBefore as Record<string, unknown>) : {};
+  const before =
+    data.listBefore && typeof data.listBefore === "object" ? (data.listBefore as Record<string, unknown>) : {};
   const after = data.listAfter && typeof data.listAfter === "object" ? (data.listAfter as Record<string, unknown>) : {};
   const board = data.board && typeof data.board === "object" ? (data.board as Record<string, unknown>) : {};
-  const member = a.memberCreator && typeof a.memberCreator === "object" ? (a.memberCreator as Record<string, unknown>) : {};
+  const member =
+    a.memberCreator && typeof a.memberCreator === "object" ? (a.memberCreator as Record<string, unknown>) : {};
   const fromList = nonEmpty(before.id);
   const toList = nonEmpty(after.id);
   if (!fromList || !toList || fromList === toList) return null;

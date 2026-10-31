@@ -64,7 +64,11 @@ test("uses ProductConfig 1.1 list IDs even when board lists have custom names", 
 
   try {
     const { getWorkflowListIds } = await import("./client.js");
-    const result = await getWorkflowListIds({ schema_version: "1.1", trello_board_id: "0123456789abcdef01234567", trello_lists: configuredLists });
+    const result = await getWorkflowListIds({
+      schema_version: "1.1",
+      trello_board_id: "0123456789abcdef01234567",
+      trello_lists: configuredLists,
+    });
     assert.deepEqual(result, {
       newIdeas: "id-new",
       backlog: "id-backlog",
@@ -78,11 +82,17 @@ test("uses ProductConfig 1.1 list IDs even when board lists have custom names", 
       done: "id-done",
     });
     await assert.rejects(
-      () => getWorkflowListIds({ schema_version: "1.1", trello_board_id: "0123456789abcdef01234567", trello_lists: { ...configuredLists, done: configuredLists.backlog } }),
+      () =>
+        getWorkflowListIds({
+          schema_version: "1.1",
+          trello_board_id: "0123456789abcdef01234567",
+          trello_lists: { ...configuredLists, done: configuredLists.backlog },
+        }),
       /distinct Trello list ID/,
     );
     await assert.rejects(
-      () => getWorkflowListIds({ schema_version: "1.1", trello_board_id: "another-board", trello_lists: configuredLists }),
+      () =>
+        getWorkflowListIds({ schema_version: "1.1", trello_board_id: "another-board", trello_lists: configuredLists }),
       /does not match the configured Trello board/,
     );
   } finally {

@@ -14,8 +14,5 @@ test("accepts the current canonical template version", () => {
 });
 
 test("rejects duplicate board list names", () => {
-  assert.throws(
-    () => parseBoardWorkflowTemplate("template_version: 1\nlists:\n  - Backlog\n  - Backlog\n"),
-    /unique/,
-  );
+  assert.throws(() => parseBoardWorkflowTemplate("template_version: 1\nlists:\n  - Backlog\n  - Backlog\n"), /unique/);
 });

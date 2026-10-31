@@ -17,7 +17,9 @@ const gateCommands: Record<CodingGate, string> = {
 };
 
 function object(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function section(markdown: string, title: string): string {
@@ -32,20 +34,31 @@ function section(markdown: string, title: string): string {
 
 function objectiveFromSpec(markdown: string): string {
   const outcome = section(markdown, "Outcome and scope");
-  const objective = outcome.split(/\r?\n/).map((line) => line.replace(/^\s*[-*+]\s+/, "").trim()).filter(Boolean).join(" ");
+  const objective = outcome
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*+]\s+/, "").trim())
+    .filter(Boolean)
+    .join(" ");
   if (!objective) throw new Error("The accepted spec is missing its required 'Outcome and scope' content.");
   return objective;
 }
 
 function supportedGates(value: unknown): CodingGate[] {
-  if (!Array.isArray(value) || value.length === 0) throw new Error("The accepted Work Contract has no required validation gates.");
+  if (!Array.isArray(value) || value.length === 0)
+    throw new Error("The accepted Work Contract has no required validation gates.");
   const gates: CodingGate[] = [];
   for (const item of value) {
     const validation = object(item);
     const name = String(validation?.name ?? "").toLowerCase() as CodingGate;
     const command = String(validation?.command ?? "");
-    if (!(name in gateCommands)) throw new Error(`The Coding Agent does not support required validation '${String(validation?.name ?? "missing")}'.`);
-    if (gateCommands[name] !== command) throw new Error(`Validation '${name}' requires '${command}', but the Coding Agent deterministically runs '${gateCommands[name]}'.`);
+    if (!(name in gateCommands))
+      throw new Error(
+        `The Coding Agent does not support required validation '${String(validation?.name ?? "missing")}'.`,
+      );
+    if (gateCommands[name] !== command)
+      throw new Error(
+        `Validation '${name}' requires '${command}', but the Coding Agent deterministically runs '${gateCommands[name]}'.`,
+      );
     if (!gates.includes(name)) gates.push(name);
   }
   return gates;
@@ -77,9 +90,14 @@ export function adaptAcceptedWorkContract(input: CodingContractAdapterInput): Wo
   const workItem = object(v3.work_item)!;
   const permitted = object(v3.permitted_scope)!;
   const acceptedIntentHash = sha256(input.frozenIntentBytes);
-  if (acceptedIntentHash !== input.expected.intentSha256) throw new Error("The frozen intent copy in the execution workspace has changed.");
+  if (acceptedIntentHash !== input.expected.intentSha256)
+    throw new Error("The frozen intent copy in the execution workspace has changed.");
   const acceptanceWorkItem = object(acceptance.work_item);
-  if (acceptance.decision !== "accepted_for_execution" || acceptanceWorkItem?.trello_card_id !== input.card.id || acceptance.authorized_by === undefined) {
+  if (
+    acceptance.decision !== "accepted_for_execution" ||
+    acceptanceWorkItem?.trello_card_id !== input.card.id ||
+    acceptance.authorized_by === undefined
+  ) {
     throw new Error("The SpecAcceptanceRecord does not authorize this work item for Execution.");
   }
   const acceptanceSpec = object(acceptance.spec);
@@ -89,16 +107,24 @@ export function adaptAcceptedWorkContract(input: CodingContractAdapterInput): Wo
   const gates = supportedGates(v3.required_validation);
   const criteria = v3.acceptance_criteria as string[];
   const acceptance_criteria: Record<string, string> = {};
-  criteria.forEach((criterion, index) => { acceptance_criteria[`AC${index + 1}`] = criterion; });
+  criteria.forEach((criterion, index) => {
+    acceptance_criteria[`AC${index + 1}`] = criterion;
+  });
   const name = input.card.name;
-  const workItemType = name.startsWith("[Epic]") ? "Epic" : name.startsWith("[Feature]") ? "Feature" : name.startsWith("[Enabler]") ? "Technical Enabler" : "User Story";
+  const workItemType = name.startsWith("[Epic]")
+    ? "Epic"
+    : name.startsWith("[Feature]")
+      ? "Feature"
+      : name.startsWith("[Enabler]")
+        ? "Technical Enabler"
+        : "User Story";
   const specRepository = String(acceptanceSpec.repository).replace(/\/$/, "");
   const specReviewUrl = `${specRepository}/blob/${String(acceptanceSpec.commit_sha)}/${String(acceptanceSpec.path)}`;
   const constraints = Array.isArray(v3.policy_controls)
     ? v3.policy_controls.map((control) => {
-      const entry = object(control)!;
-      return `${String(entry.control_id)}: ${String(entry.required_action)}; evidence: ${String(entry.evidence_expected)}`;
-    })
+        const entry = object(control)!;
+        return `${String(entry.control_id)}: ${String(entry.required_action)}; evidence: ${String(entry.evidence_expected)}`;
+      })
     : [];
   return {
     schema_version: 2,
@@ -106,7 +132,9 @@ export function adaptAcceptedWorkContract(input: CodingContractAdapterInput): Wo
     objective: objectiveFromSpec(input.specMarkdown),
     acceptance_criteria,
     required_validation: gates,
-    ...(Array.isArray(permitted.excluded) && permitted.excluded.length ? { non_goals: permitted.excluded.map(String) } : {}),
+    ...(Array.isArray(permitted.excluded) && permitted.excluded.length
+      ? { non_goals: permitted.excluded.map(String) }
+      : {}),
     ...(constraints.length ? { constraints } : {}),
     intent: {
       path: input.frozenIntentPath,

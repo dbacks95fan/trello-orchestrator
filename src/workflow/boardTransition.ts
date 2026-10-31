@@ -41,8 +41,15 @@ function containsEvent(comments: TrelloComment[], eventId: string): boolean {
   });
 }
 
-async function block(event: BoardTransitionEvent, deps: BoardTransitionDependencies, reason: string): Promise<BoardTransitionResult> {
-  await deps.commentOnCard(event.card_id, `Transition blocked: ${reason}\n\nEvent ${event.event_id} needs human resolution.`);
+async function block(
+  event: BoardTransitionEvent,
+  deps: BoardTransitionDependencies,
+  reason: string,
+): Promise<BoardTransitionResult> {
+  await deps.commentOnCard(
+    event.card_id,
+    `Transition blocked: ${reason}\n\nEvent ${event.event_id} needs human resolution.`,
+  );
   return { disposition: "blocked", reason };
 }
 
@@ -56,7 +63,8 @@ export async function processBoardTransition(
   try {
     const validation = deps.validator.validate("BoardTransitionEvent", event);
     if (!validation.valid) return block(event, deps, `Invalid BoardTransitionEvent: ${validation.errors.join("; ")}`);
-    if (event.board_id !== deps.boardId) return block(event, deps, "The event board ID does not match the configured product board.");
+    if (event.board_id !== deps.boardId)
+      return block(event, deps, "The event board ID does not match the configured product board.");
 
     const card = await deps.getCard(event.card_id);
     if (card.idBoard !== event.board_id || card.idList !== event.to_list_id) {
@@ -71,14 +79,16 @@ export async function processBoardTransition(
     if (!productValidation.valid) {
       return block(event, deps, `The product configuration is invalid: ${productValidation.errors.join("; ")}`);
     }
-    if (product.trello_board_id !== event.board_id) return block(event, deps, "The product configuration belongs to a different board.");
+    if (product.trello_board_id !== event.board_id)
+      return block(event, deps, "The product configuration belongs to a different board.");
     const listIds = await deps.getWorkflowListIds(product);
     const resolution = resolveTransition(event.from_list_id, event.to_list_id, listIds);
     await deps.commentOnCard(
       event.card_id,
       `${EVENT_MARKER}${JSON.stringify(event)} -->\nTransition observed: ${resolution.from ?? "unknown"} -> ${resolution.to ?? "unknown"}.`,
     );
-    if (resolution.action === "invalid") return block(event, deps, "This move is not an authorized in-order lifecycle transition.");
+    if (resolution.action === "invalid")
+      return block(event, deps, "This move is not an authorized in-order lifecycle transition.");
 
     if (resolution.requiresProductOwner) {
       if (!product.authorized_product_owner_ids.includes(event.actor_id)) {
@@ -90,7 +100,9 @@ export async function processBoardTransition(
     return { disposition: "accepted", action: resolution.action };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    await deps.commentOnCard(event.card_id, `Transition processing failed and needs human resolution: ${reason}`).catch(() => undefined);
+    await deps
+      .commentOnCard(event.card_id, `Transition processing failed and needs human resolution: ${reason}`)
+      .catch(() => undefined);
     return { disposition: "blocked", reason };
   } finally {
     inFlight.delete(event.event_id);

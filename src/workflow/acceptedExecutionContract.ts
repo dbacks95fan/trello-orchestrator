@@ -40,14 +40,22 @@ export interface AcceptedExecutionOptions {
 }
 
 /** Recheck frozen and accepted references immediately before constructing the Coding Agent v2 contract. */
-export async function loadAcceptedExecutionContract(options: AcceptedExecutionOptions): Promise<AcceptedExecutionContract> {
+export async function loadAcceptedExecutionContract(
+  options: AcceptedExecutionOptions,
+): Promise<AcceptedExecutionContract> {
   const { card, acceptance, validator } = options;
   const acceptanceValidation = validator.validate("SpecAcceptanceRecord", acceptance);
-  if (!acceptanceValidation.valid) throw new Error(`SpecAcceptanceRecord is invalid: ${acceptanceValidation.errors.join("; ")}`);
+  if (!acceptanceValidation.valid)
+    throw new Error(`SpecAcceptanceRecord is invalid: ${acceptanceValidation.errors.join("; ")}`);
   const freeze = activeFreezeForCard(card);
   if (!freeze) throw new Error("There is no active Prioritized freeze for this card.");
   const workItem = acceptance.work_item as Record<string, unknown>;
-  if (workItem.product_id !== freeze.tuple.productId || workItem.intent_id !== freeze.tuple.intentId || workItem.intent_version !== freeze.tuple.intentVersion || workItem.trello_card_id !== card.id) {
+  if (
+    workItem.product_id !== freeze.tuple.productId ||
+    workItem.intent_id !== freeze.tuple.intentId ||
+    workItem.intent_version !== freeze.tuple.intentVersion ||
+    workItem.trello_card_id !== card.id
+  ) {
     throw new Error("The accepted work item no longer matches the active Prioritized freeze.");
   }
 
@@ -62,35 +70,77 @@ export async function loadAcceptedExecutionContract(options: AcceptedExecutionOp
   if (!resolved.productConfig.authorized_product_owner_ids.includes(String(acceptance.authorized_by))) {
     throw new Error("The SpecAcceptanceRecord author is not an authorized product owner.");
   }
-  const productRepositoryReadToken = await options.createProductRepositoryReadToken(resolved.productConfig.target_repository);
+  const productRepositoryReadToken = await options.createProductRepositoryReadToken(
+    resolved.productConfig.target_repository,
+  );
   if (
-    resolved.intentCommit !== freeze.tuple.intentCommit || frozenArtifactSha256(resolved.frozenIntentBytes) !== freeze.tuple.intentSha256 ||
-    resolved.policyProfileId !== freeze.tuple.policyProfileId || resolved.policyProfileVersion !== freeze.tuple.policyProfileVersion ||
+    resolved.intentCommit !== freeze.tuple.intentCommit ||
+    frozenArtifactSha256(resolved.frozenIntentBytes) !== freeze.tuple.intentSha256 ||
+    resolved.policyProfileId !== freeze.tuple.policyProfileId ||
+    resolved.policyProfileVersion !== freeze.tuple.policyProfileVersion ||
     resolved.policyProfileContentSha256 !== freeze.tuple.policyProfileSha256
-  ) throw new Error("The frozen intent or policy profile has changed since Prioritized.");
+  )
+    throw new Error("The frozen intent or policy profile has changed since Prioritized.");
 
-  if (options.workspaceRef !== `work/${resolved.intentId}`) throw new Error("The accepted Spec & Design invocation does not target the expected work branch.");
+  if (options.workspaceRef !== `work/${resolved.intentId}`)
+    throw new Error("The accepted Spec & Design invocation does not target the expected work branch.");
   const repositoryPath = join(options.workspaceRoot, resolved.intentId);
   const [specText, contractText] = await Promise.all([
-    readArtifactRef(acceptance.spec as Record<string, unknown>, options.intentBacklogApiBase, productRepositoryReadToken, options.fetchFn),
-    readArtifactRef(acceptance.work_contract as Record<string, unknown>, options.intentBacklogApiBase, productRepositoryReadToken, options.fetchFn),
+    readArtifactRef(
+      acceptance.spec as Record<string, unknown>,
+      options.intentBacklogApiBase,
+      productRepositoryReadToken,
+      options.fetchFn,
+    ),
+    readArtifactRef(
+      acceptance.work_contract as Record<string, unknown>,
+      options.intentBacklogApiBase,
+      productRepositoryReadToken,
+      options.fetchFn,
+    ),
   ]);
-  if (String((acceptance.spec as Record<string, unknown>).repository) !== String((acceptance.work_contract as Record<string, unknown>).repository) ||
-      String((acceptance.spec as Record<string, unknown>).commit_sha) !== String((acceptance.work_contract as Record<string, unknown>).commit_sha)) {
+  if (
+    String((acceptance.spec as Record<string, unknown>).repository) !==
+      String((acceptance.work_contract as Record<string, unknown>).repository) ||
+    String((acceptance.spec as Record<string, unknown>).commit_sha) !==
+      String((acceptance.work_contract as Record<string, unknown>).commit_sha)
+  ) {
     throw new Error("The accepted spec and Work Contract do not share one immutable repository revision.");
   }
   const workContractV3 = parseYaml(contractText) as unknown;
   const target = (workContractV3 as Record<string, unknown>)?.target as Record<string, unknown> | undefined;
   const targetCommit = String(target?.commit_sha ?? "");
-  if (targetCommit !== options.targetCommit) throw new Error("The accepted Work Contract target commit does not match its StageInvocation.");
+  if (targetCommit !== options.targetCommit)
+    throw new Error("The accepted Work Contract target commit does not match its StageInvocation.");
 
-  const configuredRepository = resolved.productConfig.target_repository.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
-  const { stdout: originOutput } = await execFileAsync("git", ["config", "--get", "remote.origin.url"], { cwd: repositoryPath, windowsHide: true });
-  const origin = originOutput.trim().replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
-  if (origin !== configuredRepository) throw new Error("The isolated Spec & Design workspace origin does not match product.yaml target_repository.");
-  const { stdout: branchHead } = await execFileAsync("git", ["rev-parse", options.workspaceRef], { cwd: repositoryPath, windowsHide: true });
-  const { stdout: specCommit } = await execFileAsync("git", ["rev-parse", String((acceptance.spec as Record<string, unknown>).commit_sha)], { cwd: repositoryPath, windowsHide: true });
-  await execFileAsync("git", ["merge-base", "--is-ancestor", specCommit.trim(), branchHead.trim()], { cwd: repositoryPath, windowsHide: true });
+  const configuredRepository = resolved.productConfig.target_repository
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  const { stdout: originOutput } = await execFileAsync("git", ["config", "--get", "remote.origin.url"], {
+    cwd: repositoryPath,
+    windowsHide: true,
+  });
+  const origin = originOutput
+    .trim()
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  if (origin !== configuredRepository)
+    throw new Error("The isolated Spec & Design workspace origin does not match product.yaml target_repository.");
+  const { stdout: branchHead } = await execFileAsync("git", ["rev-parse", options.workspaceRef], {
+    cwd: repositoryPath,
+    windowsHide: true,
+  });
+  const { stdout: specCommit } = await execFileAsync(
+    "git",
+    ["rev-parse", String((acceptance.spec as Record<string, unknown>).commit_sha)],
+    { cwd: repositoryPath, windowsHide: true },
+  );
+  await execFileAsync("git", ["merge-base", "--is-ancestor", specCommit.trim(), branchHead.trim()], {
+    cwd: repositoryPath,
+    windowsHide: true,
+  });
 
   const frozenIntentPath = `.agent/work/${resolved.intentId}/intent.md`;
   const frozenIntentOnBranch = await readCommittedWorkspaceFile(repositoryPath, branchHead.trim(), frozenIntentPath);
@@ -122,7 +172,8 @@ export async function loadAcceptedExecutionContract(options: AcceptedExecutionOp
     expected,
     validator,
   });
-  if (branchHead.trim() !== specCommit.trim()) throw new Error("The accepted Spec & Design branch moved after the human accepted its artifacts.");
+  if (branchHead.trim() !== specCommit.trim())
+    throw new Error("The accepted Spec & Design branch moved after the human accepted its artifacts.");
   const invocation = {
     schema_version: "1.1",
     invocation_id: randomUUID(),
@@ -137,6 +188,7 @@ export async function loadAcceptedExecutionContract(options: AcceptedExecutionOp
     write_paths: ["."],
   };
   const invocationValidation = validator.validate("StageInvocation", invocation);
-  if (!invocationValidation.valid) throw new Error(`Execution StageInvocation is invalid: ${invocationValidation.errors.join("; ")}`);
+  if (!invocationValidation.valid)
+    throw new Error(`Execution StageInvocation is invalid: ${invocationValidation.errors.join("; ")}`);
   return { workContract, invocation, repositoryPath, baseBranch: options.workspaceRef };
 }

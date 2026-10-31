@@ -89,10 +89,14 @@ test("runs the canonical happy-path transitions with schema-valid local test dou
       validator,
       getCard: async () => card,
       getCardComments: async () => comments,
-      commentOnCard: async (_id, text) => { comments.push({ id: `comment-${comments.length + 1}`, data: { text } }); },
+      commentOnCard: async (_id, text) => {
+        comments.push({ id: `comment-${comments.length + 1}`, data: { text } });
+      },
       getProductConfig: async () => product,
       getWorkflowListIds: async () => lists,
-      dispatch: async (action) => { actions.push(action); },
+      dispatch: async (action) => {
+        actions.push(action);
+      },
     });
     assert.equal(result.disposition, "accepted", `${from} -> ${to}: ${result.reason ?? ""}`);
   }
