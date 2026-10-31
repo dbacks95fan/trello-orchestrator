@@ -1,7 +1,12 @@
 // ABOUTME: Unit tests for the docker run argv and result parsing of the Spec & Design Agent container.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDockerArgs, parseAgentResult, CONTAINER_WORKSPACE } from "./runSpecDesignAgent.js";
+import {
+  buildDockerArgs,
+  parseAgentResult,
+  CONTAINER_CHECK_MANIFEST,
+  CONTAINER_WORKSPACE,
+} from "./runSpecDesignAgent.js";
 
 test("buildDockerArgs bind-mounts the workspace and mirrors the compose hardening", () => {
   const args = buildDockerArgs({
@@ -56,6 +61,28 @@ test("buildDockerArgs does not read or inject agent credentials", () => {
   assert.ok(args.includes("GIT_CONFIG_COUNT=3"));
   assert.ok(!args.includes("SPEC_AGENT_GITHUB_TOKEN"));
   assert.equal(args[args.length - 1], "img");
+});
+
+test("buildDockerArgs mounts the trusted check manifest read-only and points the agent at it", () => {
+  const args = buildDockerArgs({
+    docker: ["docker"],
+    image: "img",
+    hostWorkspace: "/ws",
+    provider: "codex",
+    checkManifestPath: "C:\\Repos\\coding-agent\\config\\manifest.json",
+  });
+  assert.ok(
+    args.includes(
+      `type=bind,source=C:\\Repos\\coding-agent\\config\\manifest.json,target=${CONTAINER_CHECK_MANIFEST},readonly`,
+    ),
+  );
+  assert.ok(args.includes(`SPEC_AGENT_CHECK_MANIFEST=${CONTAINER_CHECK_MANIFEST}`));
+  assert.equal(args[args.length - 1], "img");
+});
+
+test("buildDockerArgs passes no check manifest when none is configured", () => {
+  const args = buildDockerArgs({ docker: ["docker"], image: "img", hostWorkspace: "/ws", provider: "mock" });
+  assert.ok(!args.some((arg) => arg.includes(CONTAINER_CHECK_MANIFEST)));
 });
 
 test("buildDockerArgs carries extra prefix arguments from the docker command", () => {

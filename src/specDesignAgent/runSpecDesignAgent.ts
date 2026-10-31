@@ -54,6 +54,8 @@ export interface SpecDesignResult {
  *  `target.workspace` must be this path, not the host path, because the agent
  *  resolves it from inside the container. */
 export const CONTAINER_WORKSPACE = "/work";
+/** Where the operator check manifest is mounted read-only inside the container. */
+export const CONTAINER_CHECK_MANIFEST = "/config/check-manifest.json";
 const REQUEST_BASENAME = "spec-design-request.json";
 
 export interface DockerRunSpec {
@@ -65,6 +67,8 @@ export interface DockerRunSpec {
   provider: string;
   envFile?: string | null;
   containerName?: string;
+  /** Host path of the trusted check manifest the Coding Agent also enforces. */
+  checkManifestPath?: string | null;
 }
 
 /** Git refuses to operate on a bind-mounted repository whose owner differs from
@@ -119,6 +123,14 @@ export function buildDockerArgs(spec: DockerRunSpec): string[] {
       `type=bind,source=${spec.inputSnapshotPath},target=${CONTAINER_WORKSPACE}/.agent/inputs/${spec.invocationId},readonly`,
     );
   }
+  if (spec.checkManifestPath) {
+    args.push(
+      "--mount",
+      `type=bind,source=${spec.checkManifestPath},target=${CONTAINER_CHECK_MANIFEST},readonly`,
+      "-e",
+      `SPEC_AGENT_CHECK_MANIFEST=${CONTAINER_CHECK_MANIFEST}`,
+    );
+  }
   if (spec.envFile) args.push("--env-file", spec.envFile);
   if (spec.containerName) args.push("--name", spec.containerName);
   args.push(spec.image);
@@ -156,6 +168,8 @@ export interface RunSpecDesignAgentOptions {
   provider?: string;
   /** `null` omits `--env-file` entirely; omitted falls back to configuration. */
   envFile?: string | null;
+  /** `null` passes no check manifest; omitted falls back to configuration. */
+  checkManifestPath?: string | null;
   timeoutMs?: number;
   runtime?: "docker" | "local";
   localCommand?: string[];
@@ -168,8 +182,10 @@ export async function runSpecDesignAgent(
 ): Promise<SpecDesignResult> {
   const provider = options.provider ?? config.specDesignProvider;
   const runtime = options.runtime ?? config.specDesignRuntime;
+  const checkManifestPath =
+    options.checkManifestPath === undefined ? config.specDesignCheckManifest : options.checkManifestPath;
   if (runtime === "local") {
-    return runLocalSpecDesignAgent(request, options.hostWorkspace, provider, options);
+    return runLocalSpecDesignAgent(request, options.hostWorkspace, provider, checkManifestPath, options);
   }
   if (runtime !== "docker") {
     return parseAgentResult("", `Unsupported Spec & Design runtime: ${runtime}`, null);
@@ -192,6 +208,7 @@ export async function runSpecDesignAgent(
     provider,
     envFile,
     containerName: `spec-design-${request.runId}`,
+    checkManifestPath,
   });
   const argv = [...dockerArgs, "spec", "--request", requestContainerPath];
 
@@ -239,6 +256,7 @@ async function runLocalSpecDesignAgent(
   request: SpecDesignRequest,
   hostWorkspace: string,
   provider: string,
+  checkManifestPath: string | null,
   options: RunSpecDesignAgentOptions,
 ): Promise<SpecDesignResult> {
   const requestPath = join(hostWorkspace, REQUEST_BASENAME);
@@ -268,6 +286,7 @@ async function runLocalSpecDesignAgent(
         GIT_COMMITTER_NAME: "Spec and Design Agent",
         GIT_COMMITTER_EMAIL: "agent@agentic-sdlc.local",
         SPEC_AGENT_PROVIDER: provider,
+        ...(checkManifestPath ? { SPEC_AGENT_CHECK_MANIFEST: checkManifestPath } : {}),
       },
       windowsHide: true,
     });
