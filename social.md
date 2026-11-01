@@ -182,3 +182,11 @@ the Evaluation invocation is built from the recorded Execution run.
   failures go back to Execution, at most twice per freeze by default. A spec or
   policy defect waits for the accountable human.
 - **One client for both NAS workers,** since they share the same HTTP boundary.
+
+Also 2026-11-01: moving a card out of Human Approval now records a schema-valid
+HumanApprovalRecord against the newest verified pass, and a ClosureRecord for a
+stop. The rationale is the owner's own "Rationale:" comment, or a plain statement
+that none was given; it is never invented. Release and Observation records are
+left alone on purpose: their owners (the release and observation controls) don't
+exist yet, and the canonical ReleaseRecord points at the approval with a Git
+ArtifactRef while the approval lives on the card, a gap flagged upstream.

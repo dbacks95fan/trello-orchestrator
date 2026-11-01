@@ -240,8 +240,13 @@ records remain manual and are not enforced by this build.
    `EVALUATION_REWORK_LIMIT` (default 2) times per freeze. Specification or
    policy findings, `needs_decision`, `blocked`, and `failed` stay in Evaluation
    for the accountable human. A non-candidate Coding Agent result stays in
-   Execution. Later human records and Release/Observation/Done transitions are
-   not yet enforced. The Orchestrator never moves a card to Done.
+   Execution.
+10. A product owner's move out of Human Approval records a schema-valid
+   `HumanApprovalRecord` against the newest verified pass (and a `ClosureRecord`
+   for a stop); see `docs/HUMAN_RECORDS.md`. Release, Production Observation,
+   and Done transitions are not yet validated, because the release and
+   observation controls that own those records do not exist yet. The
+   Orchestrator never merges, releases, or moves a card to Done.
 
 ## Setup
 

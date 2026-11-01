@@ -53,8 +53,23 @@ A recorded Spec Acceptance Record looks like this, with sample values:
 }
 ```
 
-## Other Human Decisions
+## Human Approval
 
-The canonical lifecycle defines `HumanApprovalRecord`, `ReleaseRecord`, `ObservationRecord`, and `ClosureRecord`. In this Orchestrator version, those later records are **not yet validated or used to authorize downstream actions**. The Orchestrator observes the associated list transitions and leaves the decision to the accountable human. It does not release software, declare production outcomes, or close work on a human's behalf.
+The product owner decides by moving the card out of `Human Approval`, the same way Spec Acceptance works:
 
-The user may add a schema-named record comment for those stages for visibility, but that comment is not currently an enforced gate. Do not treat it as proof that the Orchestrator verified the decision or artifact references.
+| Move to | Recorded decision |
+| --- | --- |
+| `Release` | `approved_for_integration_and_release` |
+| `Execution` | `return_to_execution` |
+| `Spec & Design` | `return_to_spec_and_design` |
+| `Done` | `stopped`, plus a `ClosureRecord` with outcome `stopped` |
+
+The Orchestrator builds the `HumanApprovalRecord` from the newest Evaluation result on the card, which must be a `pass` with an accepted `StageResultDecision` under the active freeze. It sets `candidate`, `evidence`, and `evaluation` from that run, `authorized_by` to the Trello member who moved the card, and `recorded_at` to the time of the move. It posts the record as an `agentic-sdlc-human-record` comment. If those conditions do not hold, nothing is recorded and the card holds with a comment.
+
+`rationale` (and a stop's `reason`) comes from the owner's newest comment that starts with `Rationale:` or `Reason:` and was written after the evaluation result. Without one, the record says plainly that no written rationale was given; it never invents one. To give a reason, comment `Rationale: ...` on the card before moving it.
+
+Approval does not merge or release anything; the authorized integration path does. A return to Execution or Spec & Design is recorded but not started automatically, because neither agent yet accepts a human's free-text feedback as a durable input.
+
+## Release, Production Observation, and Done
+
+`ReleaseRecord` and `ObservationRecord` are owned by the release and observation controls, which do not exist yet, so the Orchestrator does not validate those transitions or treat a pasted record as a gate. It never releases software, declares production outcomes, or closes released work on a human's behalf.
