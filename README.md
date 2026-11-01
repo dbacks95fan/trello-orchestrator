@@ -117,7 +117,9 @@ engineering-stage handler for that work item:
    StageInvocation 1.1 with the same freeze and invocation IDs. It writes the request
    into the invocation bundle, then runs the agent in the configured runtime
    (`src/specDesignAgent/runSpecDesignAgent.ts`). Docker remains the default;
-   local Codex CLI execution is available for manual development runs.
+   a local `uv run` of the agent is available for manual development runs. The
+   default `codex` provider calls the OpenAI API directly with `OPENAI_API_KEY`
+   from the agent's runtime env file; no Codex CLI is installed or used.
 
    ```
    docker run --rm --mount type=bind,source=<invocation-bundle>,target=/work \
@@ -337,8 +339,9 @@ npm run spec-design:manual -- --card-id <trello-card-id>
 This local command still uses the Orchestrator's Trello and GitHub credentials to
 verify the active freeze, stage exact input snapshots, and run the agent. The
 agent clones the product repository at its current GitHub default-branch commit,
-creates the work branch, commits, and pushes its own artifacts. Codex CLI uses
-the local Windows sign-in. The container path remains the default and the
+creates the work branch, commits, and pushes its own artifacts. The agent reads
+`OPENAI_API_KEY` from its runtime env file (`SPEC_DESIGN_AGENT_RUNTIME_ENV`), the
+same as in the container. The container path remains the default and the
 canonical deployment target.
 
 ## Known limitations (v0.1, on purpose)
