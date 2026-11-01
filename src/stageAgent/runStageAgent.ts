@@ -1,6 +1,6 @@
 // Copyright (c) 2026 DPSystems, LLC.
 // ABOUTME: Submits a StageInvocation to a stage worker service (Coding Agent or Evaluator) over HTTP and polls for its result.
-// ABOUTME: Both workers expose the same boundary: POST /invocations, then GET /invocations/{id} until done.
+// ABOUTME: Workers and the deploy service share one boundary: POST a request, then GET it by ID until done.
 
 export interface StageAgentResult {
   stageResult: Record<string, unknown> | null;
@@ -66,12 +66,27 @@ function parseView(body: string): ServiceView | null {
   }
 }
 
-/** Runs one invocation on a stage worker service. Never throws; every problem is returned as `error`. */
-export async function runStageAgent(
-  invocation: Record<string, unknown>,
+/** What a service's POST and GET are about: its collection path and the word used for one item in messages. */
+export interface ServiceSubmission {
+  collection: "invocations" | "deployments";
+  noun: "invocation" | "deployment";
+  id: string;
+  body: Record<string, unknown>;
+}
+
+export type ServicePoll =
+  { view: Record<string, unknown>; error: null; rawOutput: string } | { view: null; error: string; rawOutput: string };
+
+/**
+ * Submits one item to a NAS worker service and polls until it is done. Both stage workers and the deploy
+ * service share this boundary: POST /<collection>, then GET /<collection>/{id}. Never throws.
+ */
+export async function submitAndPoll(
+  submission: ServiceSubmission,
   options: StageAgentRunOptions,
-): Promise<StageAgentResult> {
+): Promise<ServicePoll> {
   const name = options.serviceName;
+  const { noun, id } = submission;
   const requestFn = options.requestFn ?? fetch;
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolvePromise) => setTimeout(resolvePromise, ms)));
@@ -79,52 +94,52 @@ export async function runStageAgent(
   const log = options.log ?? ((message: string) => console.log(`[trello-orchestrator] ${message}`));
   const maxPollFailures = options.maxPollFailures ?? 3;
   const base = options.endpoint.replace(/\/$/, "");
-  const invocationId = String(invocation.invocation_id ?? "");
   const headers = { Authorization: `Bearer ${options.token}` };
+  const fail = (error: string, rawOutput = ""): ServicePoll => ({ view: null, error, rawOutput });
 
   let body: string;
   let status: number;
   try {
-    const response = await requestFn(`${base}/invocations`, {
+    const response = await requestFn(`${base}/${submission.collection}`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify(invocation),
+      body: JSON.stringify(submission.body),
     });
     status = response.status;
     body = await response.text();
   } catch (err) {
-    return failure(
+    return fail(
       `The ${name} service at ${base} could not be reached: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (status === 401) return failure(`The ${name} service rejected the Orchestrator's API token (HTTP 401).`, body);
+  if (status === 401) return fail(`The ${name} service rejected the Orchestrator's API token (HTTP 401).`, body);
   if (status === 409)
-    return failure(
-      `The ${name} service is busy with another run or already holds different content for this invocation ID (HTTP 409).`,
+    return fail(
+      `The ${name} service is busy with another run or already holds different content for this ${noun} ID (HTTP 409).`,
       body,
     );
   if (status !== 200 && status !== 202)
-    return failure(`The ${name} service refused the invocation with HTTP ${status}.`, body);
+    return fail(`The ${name} service refused the ${noun} with HTTP ${status}.`, body);
   let view = parseView(body);
-  if (!view) return failure(`The ${name} service returned a response that is not JSON.`, body);
+  if (!view) return fail(`The ${name} service returned a response that is not JSON.`, body);
 
   const deadline = now() + options.timeoutMs;
   let pollFailures = 0;
   while (view.state !== "done") {
     if (now() >= deadline) {
-      return failure(
-        `The ${name} did not finish invocation ${invocationId} within ${options.timeoutMs} ms. It may still be running; check the service before acting.`,
+      return fail(
+        `The ${name} did not finish ${noun} ${id} within ${options.timeoutMs} ms. It may still be running; check the service before acting.`,
         body,
       );
     }
     await sleep(options.pollIntervalMs);
     let polled: ServiceView | null = null;
     try {
-      const response = await requestFn(`${base}/invocations/${encodeURIComponent(invocationId)}`, { headers });
+      const response = await requestFn(`${base}/${submission.collection}/${encodeURIComponent(id)}`, { headers });
       body = await response.text();
       if (response.status === 404) {
-        return failure(
-          `The ${name} service no longer knows invocation ${invocationId}; it may have restarted. The outcome is unknown and needs human triage.`,
+        return fail(
+          `The ${name} service no longer knows ${noun} ${id}; it may have restarted. The outcome is unknown and needs human triage.`,
           body,
         );
       }
@@ -134,10 +149,10 @@ export async function runStageAgent(
     }
     if (!polled) {
       pollFailures += 1;
-      log(`${name} status poll ${pollFailures}/${maxPollFailures} failed for invocation ${invocationId}.`);
+      log(`${name} status poll ${pollFailures}/${maxPollFailures} failed for ${noun} ${id}.`);
       if (pollFailures >= maxPollFailures) {
-        return failure(
-          `The ${name} status could not be read ${maxPollFailures} times in a row for invocation ${invocationId}. The outcome is unknown and needs human triage.`,
+        return fail(
+          `The ${name} status could not be read ${maxPollFailures} times in a row for ${noun} ${id}. The outcome is unknown and needs human triage.`,
           body,
         );
       }
@@ -146,5 +161,17 @@ export async function runStageAgent(
     pollFailures = 0;
     view = polled;
   }
-  return finished(view, body);
+  return { view: view as Record<string, unknown>, error: null, rawOutput: body };
+}
+
+/** Runs one invocation on a stage worker service. Never throws; every problem is returned as `error`. */
+export async function runStageAgent(
+  invocation: Record<string, unknown>,
+  options: StageAgentRunOptions,
+): Promise<StageAgentResult> {
+  const polled = await submitAndPoll(
+    { collection: "invocations", noun: "invocation", id: String(invocation.invocation_id ?? ""), body: invocation },
+    options,
+  );
+  return polled.view ? finished(polled.view as ServiceView, polled.rawOutput) : failure(polled.error, polled.rawOutput);
 }

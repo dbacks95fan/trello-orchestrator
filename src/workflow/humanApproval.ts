@@ -2,7 +2,7 @@
 // ABOUTME: Records the Human Approval Record (and a Closure Record for a stop) when the product owner moves a card
 // ABOUTME: out of Human Approval. The move is the decision; the Conductor binds it to the newest verified pass.
 import type { LifecycleValidator } from "../contracts/lifecycle.js";
-import { HUMAN_DECISION_PREFIX, type TrelloCard, type TrelloComment } from "../trello/client.js";
+import { RATIONALE_PREFIX, type TrelloCard, type TrelloComment } from "../trello/client.js";
 import { activeFreezeForCard } from "./freezeState.js";
 import { HUMAN_RECORD_MARKER } from "./humanRecords.js";
 import { latestStageRun, newestFirst, parseMachineRecord } from "./stageRecords.js";
@@ -35,10 +35,10 @@ function rationaleFor(comments: TrelloComment[], actorId: string, after: string 
   const written = newestFirst(comments).find(
     (comment) =>
       comment.idMemberCreator === actorId &&
-      HUMAN_DECISION_PREFIX.test(comment.data?.text ?? "") &&
+      RATIONALE_PREFIX.test(comment.data?.text ?? "") &&
       (!after || !comment.date || Date.parse(comment.date) > Date.parse(after)),
   );
-  return written?.data?.text?.replace(HUMAN_DECISION_PREFIX, "").trim() || null;
+  return written?.data?.text?.replace(RATIONALE_PREFIX, "").trim() || null;
 }
 
 export function humanRecordComment(definition: string, record: Record<string, unknown>, note: string): string {

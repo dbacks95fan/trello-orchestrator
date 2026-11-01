@@ -243,10 +243,16 @@ records remain manual and are not enforced by this build.
    Execution.
 10. A product owner's move out of Human Approval records a schema-valid
    `HumanApprovalRecord` against the newest verified pass (and a `ClosureRecord`
-   for a stop); see `docs/HUMAN_RECORDS.md`. Release, Production Observation,
-   and Done transitions are not yet validated, because the release and
-   observation controls that own those records do not exist yet. The
-   Orchestrator never merges, releases, or moves a card to Done.
+   for a stop); see `docs/HUMAN_RECORDS.md`. Its note links the pull request to
+   merge, with a merge commit, by hand.
+11. In Release, the owner's comment `Deploy: production` with a `Rationale:`
+   line (a `commentCard` webhook) starts a deployment: the Orchestrator checks
+   on GitHub that the merged pull request merged exactly the evaluated commit,
+   records the `DeploymentAuthorizationRecord`, calls the NAS deploy service at
+   `DEPLOY_SERVICE_API_URL/deployments`, and records the `ReleaseRecord` from its
+   report. Production Observation and Done are not yet validated. The
+   Orchestrator never merges, never deploys by itself, and never moves a card to
+   Done.
 
 ## Setup
 

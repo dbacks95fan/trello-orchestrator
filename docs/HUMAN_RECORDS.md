@@ -68,10 +68,30 @@ The Orchestrator builds the `HumanApprovalRecord` from the newest Evaluation res
 
 `rationale` (and a stop's `reason`) comes from the owner's newest comment that starts with `Rationale:` or `Reason:` and was written after the evaluation result. The canonical record requires a rationale, so without one nothing is recorded: the card holds with a comment asking for one. Comment `Rationale: ...` on the card before moving it; to retry, move the card back to Human Approval and then to its destination again.
 
-The Orchestrator acts on Trello with the product owner's identity, so Trello cannot tell its actions from the owner's. Two rules keep the owner's decisions the owner's own. The Orchestrator moves cards only along its routes (Execution to Evaluation, Evaluation to Human Approval or back to Execution, and Prioritized back to Backlog when a freeze fails), and only if the card is still where the route starts; it never moves a card out of Human Approval, Release, or Production Observation. It also refuses to post any comment that starts with `Rationale:` or `Reason:`, so relayed agent text can never pass as the owner's reason.
+The Orchestrator acts on Trello with the product owner's identity, so Trello cannot tell its actions from the owner's. Two rules keep the owner's decisions the owner's own. The Orchestrator moves cards only along its routes (Execution to Evaluation, Evaluation to Human Approval or back to Execution, and Prioritized back to Backlog when a freeze fails), and only if the card is still where the route starts; it never moves a card out of Human Approval, Release, or Production Observation. It also refuses to post any comment that starts with `Rationale:`, `Reason:`, or `Deploy:`, so relayed agent text can never pass as the owner's reason or deployment authorization.
 
 Approval does not merge or release anything; the authorized integration path does. A return to Execution or Spec & Design is recorded but not started automatically, because neither agent yet accepts a human's free-text feedback as a durable input.
 
-## Release, Production Observation, and Done
+## Release
 
-`ReleaseRecord` and `ObservationRecord` are owned by the release and observation controls, which do not exist yet, so the Orchestrator does not validate those transitions or treat a pasted record as a gate. It never releases software, declares production outcomes, or closes released work on a human's behalf.
+Approval is followed by two things only the owner does, and one the deploy service does:
+
+1. **Merge.** The approval note links the pull request from the work branch. The owner merges it into `main` with **Create a merge commit** once its required checks pass. The Orchestrator never merges.
+2. **Authorize the deployment** with a comment on the card in Release:
+
+   ```
+   Deploy: production
+   Rationale: <why it may go to production now>
+   ```
+
+3. **Deploy.** On that comment the Orchestrator re-reads it from Trello and checks: the card is in Release under an active freeze; the author is an authorized product owner; the newest `HumanApprovalRecord` is `approved_for_integration_and_release`; the candidate is not already released; and, read-only on GitHub, the newest merged pull request from the work branch merged exactly the evaluated commit, with a merge commit whose second parent is that commit, now on `main`. Any failure is explained on the card and nothing is deployed.
+
+   It then records the canonical `DeploymentAuthorizationRecord` (an `agentic-sdlc-human-record` comment): the integration commit, environment, owner, time, rationale, and a `TrelloRecordRef` to the owner's comment with the SHA-256 of its exact text. It sends that record to the deploy service (`DEPLOY_SERVICE_API_URL`), which re-checks the commit and its CI on GitHub, builds and starts it, health-checks it, and rolls back if it is unhealthy.
+
+4. **Release Record.** From the deploy service's report the Orchestrator writes the schema-valid `ReleaseRecord` 1.1 as an `agentic-sdlc-release-record` comment: candidate and integration commits, a `TrelloRecordRef` to the Human Approval Record comment, the embedded Deployment Authorization Record, the actions, the verification results, any rollback, and the status. A `released` card can be moved to Production Observation by the owner; `rolled_back`, `failed`, and `blocked` keep it in Release, and a new `Deploy:` comment tries again. If the deploy service gives no report, no Release Record is written and the card says the outcome is unknown.
+
+Each `Deploy:` comment is handled once, so a repeated webhook delivery does not deploy twice, and a released candidate is never deployed again.
+
+## Production Observation and Done
+
+`ObservationRecord` is owned by the observation control, which does not exist yet, so the Orchestrator does not validate those transitions or treat a pasted record as a gate. It never declares production outcomes or closes released work on a human's behalf.
