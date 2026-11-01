@@ -5,6 +5,7 @@ import type { LifecycleValidator } from "../contracts/lifecycle.js";
 import type { TrelloCard, TrelloComment } from "../trello/client.js";
 import { activeFreezeForCard } from "./freezeState.js";
 import { HUMAN_RECORD_MARKER } from "./humanRecords.js";
+import { newestFirst, parseMachineRecord } from "./stageRecords.js";
 
 export interface SpecAcceptanceCheck {
   record: Record<string, unknown>;
@@ -35,21 +36,6 @@ export type SpecAcceptanceOutcome =
     }
   | { accepted: false; reason: string };
 
-type MachineRecordKind = "stage-invocation" | "stage-result";
-
-function parseMachineRecord(text: string, kind: MachineRecordKind): Record<string, unknown> | null {
-  const marker = `<!-- agentic-sdlc-${kind} `;
-  if (!text.startsWith(marker)) return null;
-  const end = text.indexOf(" -->");
-  if (end < 0) return null;
-  try {
-    const value = JSON.parse(text.slice(marker.length, end)) as unknown;
-    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
 function artifactEndingWith(outputs: unknown, name: string): Record<string, unknown> | undefined {
   if (!Array.isArray(outputs)) return undefined;
   return outputs.find(
@@ -58,13 +44,6 @@ function artifactEndingWith(outputs: unknown, name: string): Record<string, unkn
       typeof artifact === "object" &&
       String((artifact as Record<string, unknown>).path).endsWith(`/${name}`),
   );
-}
-
-/** Newest first by Trello's action time. Trello already lists actions newest first, so without times keep that order. */
-function newestFirst(comments: TrelloComment[]): TrelloComment[] {
-  const timed = comments.every((comment) => comment.date && !Number.isNaN(Date.parse(comment.date)));
-  if (!timed) return comments;
-  return [...comments].sort((a, b) => Date.parse(b.date!) - Date.parse(a.date!));
 }
 
 export function specAcceptanceComment(record: Record<string, unknown>): string {

@@ -8,7 +8,7 @@ The Orchestrator treats a Trello move as a request to validate a lifecycle trans
 
 The JSON value must validate against the named definition in the canonical [lifecycle schema](https://github.com/dbacks95fan/agentic-sdlc/blob/main/schemas/lifecycle-contracts.schema.json). Record comments are visible workflow evidence. The authoritative artifacts named by a record must still be immutable Git references with content hashes.
 
-For Spec & Design, the Orchestrator also stores the schema-validated `StageInvocation` and `StageResult` JSON in Trello comments, marked `agentic-sdlc-stage-invocation` and `agentic-sdlc-stage-result`. Both records carry the same invocation ID. The canonical `StageResultDecision` Git artifact is not emitted yet.
+For Spec & Design, Execution, and Evaluation, the Orchestrator also stores the schema-validated `StageInvocation` and `StageResult` JSON in Trello comments, marked `agentic-sdlc-stage-invocation` and `agentic-sdlc-stage-result`. Both records carry the same invocation ID. For Execution and Evaluation it then records a schema-validated `StageResultDecision` (`agentic-sdlc-stage-result-decision`): `accepted` after it verifies the pushed package read-only on GitHub, or `rejected` with the reason. The decision lives on the card rather than as a Git artifact, because the Orchestrator never writes to product repositories.
 
 ## Spec Acceptance
 

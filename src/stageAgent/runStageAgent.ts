@@ -1,9 +1,11 @@
 // Copyright (c) 2026 DPSystems, LLC.
-// ABOUTME: Submits an Execution StageInvocation to the Coding Agent service over HTTP and polls for its result.
+// ABOUTME: Submits a StageInvocation to a stage worker service (Coding Agent or Evaluator) over HTTP and polls for its result.
+// ABOUTME: Both workers expose the same boundary: POST /invocations, then GET /invocations/{id} until done.
 
-export interface CodingAgentResult {
+export interface StageAgentResult {
   stageResult: Record<string, unknown> | null;
   evidencePackage: Record<string, unknown> | null;
+  evaluationPackage: Record<string, unknown> | null;
   diagnostics: Record<string, unknown> | null;
   /** Why no result could be obtained; null when the service returned a finished run. */
   error: string | null;
@@ -12,7 +14,9 @@ export interface CodingAgentResult {
 
 export type FetchRequest = typeof fetch;
 
-export interface CodingAgentRunOptions {
+export interface StageAgentRunOptions {
+  /** Used in every message, e.g. "Coding Agent" or "Evaluator". */
+  serviceName: string;
   endpoint: string;
   token: string;
   pollIntervalMs: number;
@@ -29,6 +33,7 @@ interface ServiceView {
   state?: unknown;
   stage_result?: unknown;
   evidence_package?: unknown;
+  evaluation_package?: unknown;
   diagnostics?: unknown;
 }
 
@@ -38,14 +43,15 @@ function object(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function failure(error: string, rawOutput = ""): CodingAgentResult {
-  return { stageResult: null, evidencePackage: null, diagnostics: null, error, rawOutput };
+function failure(error: string, rawOutput = ""): StageAgentResult {
+  return { stageResult: null, evidencePackage: null, evaluationPackage: null, diagnostics: null, error, rawOutput };
 }
 
-function finished(view: ServiceView, rawOutput: string): CodingAgentResult {
+function finished(view: ServiceView, rawOutput: string): StageAgentResult {
   return {
     stageResult: object(view.stage_result),
     evidencePackage: object(view.evidence_package),
+    evaluationPackage: object(view.evaluation_package),
     diagnostics: object(view.diagnostics),
     error: null,
     rawOutput,
@@ -60,11 +66,12 @@ function parseView(body: string): ServiceView | null {
   }
 }
 
-/** Runs one invocation on the Coding Agent service. Never throws; every problem is returned as `error`. */
-export async function runCodingAgent(
+/** Runs one invocation on a stage worker service. Never throws; every problem is returned as `error`. */
+export async function runStageAgent(
   invocation: Record<string, unknown>,
-  options: CodingAgentRunOptions,
-): Promise<CodingAgentResult> {
+  options: StageAgentRunOptions,
+): Promise<StageAgentResult> {
+  const name = options.serviceName;
   const requestFn = options.requestFn ?? fetch;
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolvePromise) => setTimeout(resolvePromise, ms)));
@@ -87,27 +94,26 @@ export async function runCodingAgent(
     body = await response.text();
   } catch (err) {
     return failure(
-      `The Coding Agent service at ${base} could not be reached: ${err instanceof Error ? err.message : String(err)}`,
+      `The ${name} service at ${base} could not be reached: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (status === 401)
-    return failure("The Coding Agent service rejected the Orchestrator's API token (HTTP 401).", body);
+  if (status === 401) return failure(`The ${name} service rejected the Orchestrator's API token (HTTP 401).`, body);
   if (status === 409)
     return failure(
-      "The Coding Agent service is busy with another run or already holds different content for this invocation ID (HTTP 409).",
+      `The ${name} service is busy with another run or already holds different content for this invocation ID (HTTP 409).`,
       body,
     );
   if (status !== 200 && status !== 202)
-    return failure(`The Coding Agent service refused the invocation with HTTP ${status}.`, body);
+    return failure(`The ${name} service refused the invocation with HTTP ${status}.`, body);
   let view = parseView(body);
-  if (!view) return failure("The Coding Agent service returned a response that is not JSON.", body);
+  if (!view) return failure(`The ${name} service returned a response that is not JSON.`, body);
 
   const deadline = now() + options.timeoutMs;
   let pollFailures = 0;
   while (view.state !== "done") {
     if (now() >= deadline) {
       return failure(
-        `The Coding Agent did not finish invocation ${invocationId} within ${options.timeoutMs} ms. It may still be running; check the service before acting.`,
+        `The ${name} did not finish invocation ${invocationId} within ${options.timeoutMs} ms. It may still be running; check the service before acting.`,
         body,
       );
     }
@@ -118,7 +124,7 @@ export async function runCodingAgent(
       body = await response.text();
       if (response.status === 404) {
         return failure(
-          `The Coding Agent service no longer knows invocation ${invocationId}; it may have restarted. The outcome is unknown and needs human triage.`,
+          `The ${name} service no longer knows invocation ${invocationId}; it may have restarted. The outcome is unknown and needs human triage.`,
           body,
         );
       }
@@ -128,10 +134,10 @@ export async function runCodingAgent(
     }
     if (!polled) {
       pollFailures += 1;
-      log(`Coding Agent status poll ${pollFailures}/${maxPollFailures} failed for invocation ${invocationId}.`);
+      log(`${name} status poll ${pollFailures}/${maxPollFailures} failed for invocation ${invocationId}.`);
       if (pollFailures >= maxPollFailures) {
         return failure(
-          `The Coding Agent status could not be read ${maxPollFailures} times in a row for invocation ${invocationId}. The outcome is unknown and needs human triage.`,
+          `The ${name} status could not be read ${maxPollFailures} times in a row for invocation ${invocationId}. The outcome is unknown and needs human triage.`,
           body,
         );
       }

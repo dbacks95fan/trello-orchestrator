@@ -1,5 +1,5 @@
-// ABOUTME: Coordinates spec & design, coding, and remote evaluation transitions for Trello work items.
-import { runCodingAgent } from "../codingAgent/runCodingAgent.js";
+// ABOUTME: Coordinates spec & design, coding, and evaluation transitions for Trello work items.
+import { runStageAgent, type StageAgentResult } from "../stageAgent/runStageAgent.js";
 import {
   CONTAINER_WORKSPACE,
   runSpecDesignAgent,
@@ -8,21 +8,22 @@ import {
 import { resolveSpecRequest, SpecRequestError } from "./specRequestFromCard.js";
 import { routeSpecResult } from "./specRouting.js";
 import { prepareSpecWorkspace, readCommittedWorkspaceFile, verifySpecBranchPublished } from "./specWorkspace.js";
-import { prepareGitEvaluationHandoff } from "../evaluatorAgent/gitHandoff.js";
-import { runRemoteEvaluator } from "../evaluatorAgent/remote.js";
-import { readArtifactRef } from "./humanRecords.js";
 import {
   commentOnCard,
   getCard,
+  getCardComments,
   getWorkflowListId,
   getWorkflowStageLabel,
   moveCard,
   updateCardDescription,
+  type TrelloCard,
+  type TrelloComment,
 } from "../trello/client.js";
 import { config } from "../config.js";
 import { isUnderWipLimit } from "./wip.js";
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { activeFreezeForCard, readFreezeProjection, writeFreezeProjection, type FreezeTuple } from "./freezeState.js";
 import { frozenArtifactSha256 } from "./specRequestFromCard.js";
 import { createLifecycleValidator } from "../contracts/lifecycle.js";
@@ -30,6 +31,20 @@ import { parse as parseYaml } from "yaml";
 import { validateWorkContractV3 } from "./workContractV3.js";
 import { loadAcceptedExecutionContract } from "./acceptedExecutionContract.js";
 import { createGitHubAppReadToken } from "../githubApp.js";
+import { latestStageRun, machineRecordComment, parseMachineRecord, type StageRun } from "./stageRecords.js";
+import {
+  buildEvaluationInvocation,
+  buildReworkInvocation,
+  comparePolicyEvidence,
+  compareRequiredValidation,
+  isRework,
+  routeEvaluation,
+  stageResultDecision,
+  verifyPushedPackage,
+  workContractRef,
+  type PackageReads,
+} from "./evaluationStage.js";
+import { readBranchTip, readCommitParents, readFileAtCommit } from "./githubRead.js";
 
 const lifecycleValidator = createLifecycleValidator(config.lifecycleSchemaPath);
 
@@ -39,29 +54,33 @@ export interface MoveApproval {
   eventId?: string;
 }
 
-interface AcceptedExecution {
-  cardId: string;
-  acceptance: Record<string, unknown>;
-  workspaceRef: string;
-  targetCommit: string;
-  freezeActivation: Record<string, unknown>;
-}
-const pendingQueue: AcceptedExecution[] = [];
-const pendingReviewQueue: string[] = [];
+/** Work queued for the Coding Agent: a newly accepted spec, or rework after a failed evaluation. */
+type ExecutionJob =
+  | {
+      kind: "accepted";
+      cardId: string;
+      acceptance: Record<string, unknown>;
+      workspaceRef: string;
+      targetCommit: string;
+      freezeActivation: Record<string, unknown>;
+    }
+  | { kind: "rework"; cardId: string; invocation: Record<string, unknown> };
+
+const pendingQueue: ExecutionJob[] = [];
+const pendingReviewQueue: Array<{ cardId: string; eventId: string }> = [];
 const pendingSpecQueue: Array<{ cardId: string; approval: MoveApproval }> = [];
 const manualSpecMarker = "<!-- agentic-sdlc-manual-spec-kickoff ";
 let processing = false;
 let reviewing = false;
 let specing = false;
-const handoffMarker = "<!-- agentic-sdlc-evaluator-handoff ";
 
-export function enqueueCard(execution: AcceptedExecution): void {
-  if (!pendingQueue.some((entry) => entry.cardId === execution.cardId)) pendingQueue.push(execution);
+function enqueueCard(job: ExecutionJob): void {
+  if (!pendingQueue.some((entry) => entry.cardId === job.cardId)) pendingQueue.push(job);
   void drainQueue();
 }
 
-function enqueueReview(cardId: string): void {
-  if (!pendingReviewQueue.includes(cardId)) pendingReviewQueue.push(cardId);
+function enqueueReview(cardId: string, eventId: string): void {
+  if (!pendingReviewQueue.some((entry) => entry.cardId === cardId)) pendingReviewQueue.push({ cardId, eventId });
   void drainReviewQueue();
 }
 
@@ -89,7 +108,16 @@ async function drainReviewQueue(): Promise<void> {
   if (reviewing) return;
   reviewing = true;
   try {
-    while (pendingReviewQueue.length > 0) await evaluateCard(pendingReviewQueue.shift()!);
+    while (pendingReviewQueue.length > 0) {
+      const next = pendingReviewQueue.shift()!;
+      await evaluateCard(next.cardId, next.eventId).catch(async (err: unknown) => {
+        console.error(`[trello-orchestrator] Evaluation failed for card ${next.cardId}:`, err);
+        await commentOnCard(
+          next.cardId,
+          `❌ Evaluation could not be completed: ${err instanceof Error ? err.message : String(err)}. The card stays in ${getWorkflowStageLabel("evaluation")} for human triage.`,
+        ).catch(() => undefined);
+      });
+    }
   } finally {
     reviewing = false;
   }
@@ -101,285 +129,463 @@ async function drainQueue(): Promise<void> {
   try {
     while (pendingQueue.length > 0) {
       if (!(await isUnderWipLimit(pendingQueue[0].cardId))) return;
-      await processCard(pendingQueue.shift()!);
+      const job = pendingQueue.shift()!;
+      await processCard(job).catch(async (err: unknown) => {
+        console.error(`[trello-orchestrator] Execution failed for card ${job.cardId}:`, err);
+        await commentOnCard(
+          job.cardId,
+          `❌ Execution could not be completed: ${err instanceof Error ? err.message : String(err)}. The card stays in ${getWorkflowStageLabel("execution")} for human triage.`,
+        ).catch(() => undefined);
+      });
     }
   } finally {
     processing = false;
   }
 }
 
-async function processCard(execution: AcceptedExecution): Promise<void> {
-  const { cardId } = execution;
+/** Read-only GitHub lookups on the product repository, with a freshly minted read token. */
+async function productReads(repositoryUrl: string): Promise<PackageReads> {
+  const token = await createGitHubAppReadToken({
+    appId: config.orchestratorGithubAppId,
+    installationId: config.orchestratorGithubAppInstallationId,
+    privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
+    repositoryUrl,
+  });
+  const github = { repositoryUrl, apiBase: config.intentBacklogApiBase, token };
+  return {
+    branchTip: (branch) => readBranchTip({ ...github, branch }),
+    fileAt: (commit, path) => readFileAtCommit({ ...github, commit, path }),
+    parentsOf: (commit) => readCommitParents({ ...github, commit }),
+  };
+}
+
+/** Shared rule: a result is routed only while the freeze that authorized its invocation is still the active one. */
+function freezeStillActive(card: TrelloCard, invocation: Record<string, unknown>): boolean {
+  const active = activeFreezeForCard(card);
+  return !!active && active.tuple.freezeEventId === (invocation.freeze_activation as Record<string, unknown>).event_id;
+}
+
+function acceptedDecisionFor(comments: TrelloComment[], invocationId: unknown): boolean {
+  return comments.some((comment) => {
+    const decision = parseMachineRecord(comment.data?.text ?? "", "stage-result-decision");
+    return decision !== null && decision.invocation_id === invocationId && decision.disposition === "accepted";
+  });
+}
+
+/** Rework runs already made under this freeze; the cap keeps a stubborn defect from looping forever. */
+function reworkCount(comments: TrelloComment[], freezeEventId: unknown): number {
+  return comments
+    .map((comment) => parseMachineRecord(comment.data?.text ?? "", "stage-invocation"))
+    .filter(
+      (record): record is Record<string, unknown> =>
+        record !== null &&
+        record.stage === "execution" &&
+        lifecycleValidator.validate("StageInvocation", record).valid &&
+        (record.freeze_activation as Record<string, unknown>).event_id === freezeEventId &&
+        isRework(record),
+    ).length;
+}
+
+async function recordDecision(
+  cardId: string,
+  run: StageRun,
+  result: Record<string, unknown>,
+  issues: string[],
+): Promise<boolean> {
+  const decision = stageResultDecision({
+    run,
+    result,
+    disposition: issues.length ? "rejected" : "accepted",
+    recordedAt: new Date().toISOString(),
+    ...(issues.length ? { reason: issues.join(" ") } : {}),
+  });
+  const validation = lifecycleValidator.validate("StageResultDecision", decision);
+  if (!validation.valid) throw new Error(`StageResultDecision is invalid: ${validation.errors.join("; ")}`);
+  const note = issues.length
+    ? `StageResultDecision: **rejected**. ${issues.join(" ")}`
+    : "StageResultDecision: **accepted**; the result and its pushed package were verified read-only on GitHub.";
+  await commentOnCard(cardId, machineRecordComment("stage-result-decision", decision, note));
+  return issues.length === 0;
+}
+
+/** Validates a worker's StageResult and its correlation to the invocation that produced it. */
+function correlatedResult(
+  run: StageAgentResult,
+  invocation: Record<string, unknown>,
+  stage: "execution" | "evaluation",
+): { result: Record<string, unknown> | null; problem: string | null } {
+  if (!run.stageResult) return { result: null, problem: run.error ?? "the finished run had no stage_result" };
+  const validation = lifecycleValidator.validate("StageResult", run.stageResult);
+  if (!validation.valid) return { result: null, problem: validation.errors.join("; ") };
+  if (
+    run.stageResult.invocation_id !== invocation.invocation_id ||
+    run.stageResult.stage !== stage ||
+    !isDeepStrictEqual(run.stageResult.work_item, invocation.work_item)
+  ) {
+    return { result: null, problem: "its invocation identity did not match" };
+  }
+  return { result: run.stageResult, problem: null };
+}
+
+function findingLines(result: Record<string, unknown>): string {
+  const findings = Array.isArray(result.findings) ? (result.findings as unknown[]).map(String) : [];
+  return findings.length
+    ? `\n\n**Findings**\n${findings
+        .slice(0, 15)
+        .map((f) => `- ${f}`)
+        .join("\n")}`
+    : "";
+}
+
+async function processCard(job: ExecutionJob): Promise<void> {
+  const { cardId } = job;
   const card = await getCard(cardId);
   console.log(`[trello-orchestrator] Processing card ${card.idShort} "${card.name}"`);
-
-  let invocation: Record<string, unknown>;
-  try {
-    const executionListId = getWorkflowListId("execution");
-    if (card.idList !== executionListId) throw new Error("The card no longer resides in Execution.");
-    const loaded = await loadAcceptedExecutionContract({
-      card,
-      acceptance: execution.acceptance,
-      workspaceRef: execution.workspaceRef,
-      targetCommit: execution.targetCommit,
-      intentBacklogApiBase: config.intentBacklogApiBase,
-      intentBacklogReadToken: config.intentBacklogReadToken,
-      createProductRepositoryReadToken: (repositoryUrl) =>
-        createGitHubAppReadToken({
-          appId: config.orchestratorGithubAppId,
-          installationId: config.orchestratorGithubAppInstallationId,
-          privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
-          repositoryUrl,
-        }),
-      freezeActivation: execution.freezeActivation,
-      validator: lifecycleValidator,
-    });
-    invocation = loaded.invocation;
-  } catch (err) {
-    if (err instanceof Error) {
-      await commentOnCard(cardId, `⚠️ Trello Orchestrator could not build a Work Contract:\n\n${err.message}`);
-      return;
-    }
-    throw err;
+  if (card.idList !== getWorkflowListId("execution")) {
+    await commentOnCard(cardId, "Execution was not started: the card no longer resides in Execution.");
+    return;
   }
 
-  const workingListId = getWorkflowListId("execution");
-  const reviewListId = getWorkflowListId("evaluation");
-  if (card.idList !== workingListId) return;
-  const invocationWorkItem = invocation.work_item as Record<string, unknown>;
-  const workItemId = String(invocationWorkItem.intent_id ?? "");
-  await commentOnCard(cardId, `🤖 Coding Agent started (work item \`${workItemId}\`).`);
+  let invocation: Record<string, unknown>;
+  if (job.kind === "accepted") {
+    try {
+      const loaded = await loadAcceptedExecutionContract({
+        card,
+        acceptance: job.acceptance,
+        workspaceRef: job.workspaceRef,
+        targetCommit: job.targetCommit,
+        intentBacklogApiBase: config.intentBacklogApiBase,
+        intentBacklogReadToken: config.intentBacklogReadToken,
+        createProductRepositoryReadToken: (repositoryUrl) =>
+          createGitHubAppReadToken({
+            appId: config.orchestratorGithubAppId,
+            installationId: config.orchestratorGithubAppInstallationId,
+            privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
+            repositoryUrl,
+          }),
+        freezeActivation: job.freezeActivation,
+        validator: lifecycleValidator,
+      });
+      invocation = loaded.invocation;
+    } catch (err) {
+      if (err instanceof Error) {
+        await commentOnCard(cardId, `⚠️ Trello Orchestrator could not build a Work Contract:\n\n${err.message}`);
+        return;
+      }
+      throw err;
+    }
+  } else {
+    invocation = job.invocation;
+  }
+  await runExecution(card, invocation, job.kind === "rework");
+}
 
-  const coding = await runCodingAgent(invocation, {
+/** Runs one Execution invocation, verifies the pushed candidate, and moves a verified candidate to Evaluation. */
+async function runExecution(card: TrelloCard, invocation: Record<string, unknown>, rework: boolean): Promise<void> {
+  const cardId = card.id;
+  const invocationValidation = lifecycleValidator.validate("StageInvocation", invocation);
+  if (!invocationValidation.valid) {
+    await commentOnCard(
+      cardId,
+      `❌ Execution was not started because its StageInvocation is invalid: ${invocationValidation.errors.join("; ")}`,
+    );
+    return;
+  }
+  await commentOnCard(
+    cardId,
+    machineRecordComment("stage-invocation", invocation, "Validated Execution StageInvocation recorded."),
+  );
+  const workItemId = String((invocation.work_item as Record<string, unknown>).intent_id ?? "");
+  await commentOnCard(
+    cardId,
+    `🤖 Coding Agent started (work item \`${workItemId}\`)${rework ? " to rework the findings of the failed evaluation" : ""}.`,
+  );
+
+  const coding = await runStageAgent(invocation, {
+    serviceName: "Coding Agent",
     endpoint: config.codingAgentApiUrl,
     token: config.codingAgentApiToken,
     pollIntervalMs: config.codingAgentPollIntervalMs,
     timeoutMs: config.codingAgentTimeoutMs,
   });
-  if (!coding.stageResult) {
+  const { result, problem } = correlatedResult(coding, invocation, "execution");
+  if (!result) {
     await commentOnCard(
       cardId,
-      `❌ Coding Agent produced no parseable StageResult: ${coding.error ?? "the finished run had no stage_result"}. Needs human investigation.\n\n${coding.rawOutput.slice(-1500)}`,
+      `❌ Coding Agent result was not usable: ${problem}. Needs human investigation.\n\n${coding.rawOutput.slice(-1500)}`,
     );
     return;
   }
-
-  const stageValidation = lifecycleValidator.validate("StageResult", coding.stageResult);
-  if (
-    !stageValidation.valid ||
-    coding.stageResult.invocation_id !== invocation.invocation_id ||
-    coding.stageResult.stage !== "execution"
-  ) {
-    await commentOnCard(
-      cardId,
-      `❌ Coding Agent StageResult was rejected: ${stageValidation.errors.join("; ") || "its invocation identity did not match."}`,
-    );
-    return;
-  }
-  const codingStatus = String(coding.stageResult.status ?? "unknown");
-  const codingSummary = String(coding.stageResult.summary ?? "(no summary)");
-  await commentOnCard(cardId, `🤖 Coding Agent finished: **${codingStatus}**\n\n${codingSummary}`);
-
-  if (codingStatus !== "candidate_complete") {
-    await commentOnCard(
-      cardId,
-      "⏸️ Evaluator was not invoked because only `candidate_complete` implementations are eligible for independent evaluation.",
-    );
-    return;
-  }
-
-  if (!coding.evidencePackage) {
-    await commentOnCard(
-      cardId,
-      "❌ Coding Agent did not provide the canonical Evidence Package required for Evaluation.",
-    );
-    return;
-  }
-  const evidenceValidation = lifecycleValidator.validate("EvidencePackage", coding.evidencePackage);
-  if (!evidenceValidation.valid) {
-    await commentOnCard(
-      cardId,
-      `❌ Coding Agent Evidence Package was rejected: ${evidenceValidation.errors.join("; ")}`,
-    );
-    return;
-  }
-  const handoff = await prepareGitEvaluationHandoff({
-    invocation,
-    stageResult: coding.stageResult,
-    evidencePackage: coding.evidencePackage,
-  });
-  const handoffComment = JSON.stringify(handoff);
   await commentOnCard(
     cardId,
-    `${handoffMarker}${handoffComment} -->\n🔎 Independent evaluation is ready from candidate revision \`${handoff.candidateRevision}\`. Moving this card to ${getWorkflowStageLabel("evaluation")} starts the Evaluator Agent.`,
+    machineRecordComment("stage-result", result, "Validated Execution StageResult recorded."),
   );
-  await moveCard(cardId, reviewListId);
+  const status = String(result.status);
+  await commentOnCard(
+    cardId,
+    `🤖 Coding Agent finished: **${status}**\n\n${String(result.summary ?? "(no summary)")}${findingLines(result)}`,
+  );
+  if (status !== "candidate_complete") {
+    await commentOnCard(
+      cardId,
+      `⏸️ Only a \`candidate_complete\` result goes to Evaluation. The card stays in ${getWorkflowStageLabel("execution")} for the accountable human.`,
+    );
+    return;
+  }
+
+  const run: StageRun = { invocation, result };
+  const evidenceRef = (result.output_artifacts as Record<string, unknown>[])[0];
+  const target = invocation.target as Record<string, unknown>;
+  const reads = await productReads(String(target.repository));
+  const { pkg, issues } = await verifyPushedPackage({
+    ref: evidenceRef,
+    branch: String(invocation.workspace_ref),
+    handoff: String(target.commit_sha),
+    definition: "EvidencePackage",
+    reads,
+    validator: lifecycleValidator,
+  });
+  if (pkg && !issues.length) {
+    if (!isDeepStrictEqual(pkg.candidate, result.candidate)) {
+      issues.push("The Evidence Package names a different candidate than the StageResult.");
+    }
+    const contractRef = workContractRef(invocation);
+    const contract = parseYaml(
+      (await reads.fileAt(String(contractRef.commit_sha), String(contractRef.path))).toString("utf8"),
+    ) as { required_validation?: { name: string }[]; policy_controls?: { control_id: string }[] };
+    issues.push(
+      ...compareRequiredValidation(
+        contract.required_validation ?? [],
+        (pkg.validation as Record<string, unknown>[]) ?? [],
+        "The Evidence Package",
+      ),
+      ...comparePolicyEvidence(
+        contract.policy_controls ?? [],
+        (pkg.policy_control_evidence as Record<string, unknown>[]) ?? [],
+      ),
+    );
+  }
+  if (!freezeStillActive(await getCard(cardId), invocation)) {
+    issues.push("The freeze that authorized this run is no longer active; the result is superseded.");
+  }
+  if (!(await recordDecision(cardId, run, evidenceRef, issues))) {
+    await commentOnCard(cardId, `⏸️ The candidate was not sent to Evaluation. The card stays in Execution for triage.`);
+    return;
+  }
+  await commentOnCard(
+    cardId,
+    `🔎 Candidate \`${String((result.candidate as Record<string, unknown>).commit_sha)}\` verified. Moving to ${getWorkflowStageLabel("evaluation")} for independent evaluation.`,
+  );
+  await moveCard(cardId, getWorkflowListId("evaluation"));
 }
 
-async function evaluateCard(cardId: string): Promise<void> {
-  const { getCardComments } = await import("../trello/client.js");
+/** Runs the independent Evaluator on the newest verified candidate and routes its verified result. */
+async function evaluateCard(cardId: string, eventId: string): Promise<void> {
+  const card = await getCard(cardId);
+  if (card.idList !== getWorkflowListId("evaluation")) return;
   const comments = await getCardComments(cardId);
-  const handoffComment = comments.find((comment) => comment.data.text?.startsWith(handoffMarker));
-  if (!handoffComment?.data.text) {
+  const execution = latestStageRun(comments, "execution", cardId, lifecycleValidator);
+  if (!execution || execution.result.status !== "candidate_complete") {
     await commentOnCard(
       cardId,
-      `⚠️ ${getWorkflowStageLabel("evaluation")} was entered without an evaluator handoff. No evaluator run was started.`,
+      `⚠️ ${getWorkflowStageLabel("evaluation")} was entered without a candidate_complete Execution result. No evaluation was started.`,
     );
     return;
   }
-  let handoff: Record<string, unknown>;
-  try {
-    const payload = handoffComment.data.text.slice(handoffMarker.length).split(" -->", 1)[0];
-    handoff = JSON.parse(payload);
-  } catch {
-    await commentOnCard(cardId, "⚠️ The evaluator handoff metadata is invalid. No evaluator run was started.");
+  if (!acceptedDecisionFor(comments, execution.result.invocation_id)) {
+    await commentOnCard(
+      cardId,
+      "⚠️ The newest candidate has no accepted StageResultDecision. No evaluation was started.",
+    );
     return;
   }
-  const workItem = handoff.workItem as Record<string, unknown> | undefined;
-  const intentRef = handoff.intentRef as Record<string, unknown> | undefined;
-  const contractRef = handoff.contractRef as Record<string, unknown> | undefined;
-  const evidenceRef = handoff.evidenceRef as Record<string, unknown> | undefined;
-  if (
-    !handoff.repositoryUrl ||
-    !handoff.branch ||
-    !handoff.candidateRevision ||
-    !handoff.branchRevision ||
-    !workItem ||
-    !intentRef ||
-    !contractRef ||
-    !evidenceRef ||
-    !handoff.packagePath
-  ) {
-    await commentOnCard(cardId, "⚠️ The evaluator handoff is incomplete. No evaluator run was started.");
+  if (!freezeStillActive(card, execution.invocation)) {
+    await commentOnCard(
+      cardId,
+      "⚠️ The freeze behind the newest candidate is no longer active. No evaluation was started.",
+    );
+    return;
+  }
+
+  const invocation = buildEvaluationInvocation(execution, eventId);
+  const invocationValidation = lifecycleValidator.validate("StageInvocation", invocation);
+  if (!invocationValidation.valid) {
+    await commentOnCard(
+      cardId,
+      `❌ Evaluation was not started because its StageInvocation is invalid: ${invocationValidation.errors.join("; ")}`,
+    );
     return;
   }
   await commentOnCard(
     cardId,
-    `🔎 Independent Evaluator Agent started because the card entered ${getWorkflowStageLabel("evaluation")}.`,
+    machineRecordComment("stage-invocation", invocation, "Validated Evaluation StageInvocation recorded."),
+  );
+  await commentOnCard(
+    cardId,
+    `🔎 Independent Evaluator started on candidate \`${String((execution.result.candidate as Record<string, unknown>).commit_sha)}\`.`,
   );
 
-  let productRepositoryReadToken: string;
-  try {
-    productRepositoryReadToken = await createGitHubAppReadToken({
-      appId: config.orchestratorGithubAppId,
-      installationId: config.orchestratorGithubAppInstallationId,
-      privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
-      repositoryUrl: String(handoff.repositoryUrl),
-    });
-  } catch (err) {
+  const evaluated = await runStageAgent(invocation, {
+    serviceName: "Evaluator",
+    endpoint: config.evaluatorApiUrl,
+    token: config.evaluatorApiToken,
+    pollIntervalMs: config.evaluatorPollIntervalMs,
+    timeoutMs: config.evaluatorTimeoutMs,
+  });
+  const { result, problem } = correlatedResult(evaluated, invocation, "evaluation");
+  if (!result) {
     await commentOnCard(
       cardId,
-      `❌ Orchestrator could not mint a product-repository read token: ${err instanceof Error ? err.message : String(err)}. Card remains in ${getWorkflowStageLabel("evaluation")}.`,
+      `❌ Evaluator result was not usable: ${problem}. The card stays in ${getWorkflowStageLabel("evaluation")} for investigation.\n\n${evaluated.rawOutput.slice(-1500)}`,
+    );
+    return;
+  }
+  await commentOnCard(
+    cardId,
+    machineRecordComment("stage-result", result, "Validated Evaluation StageResult recorded."),
+  );
+  const status = String(result.status);
+  await commentOnCard(
+    cardId,
+    `🔎 Evaluator finished: **${status.toUpperCase()}**\n\n${String(result.summary ?? "(no summary)")}${findingLines(result)}`,
+  );
+  if (!["pass", "fail", "needs_decision"].includes(status)) {
+    await commentOnCard(
+      cardId,
+      `⏸️ \`${status}\` stays in ${getWorkflowStageLabel("evaluation")} for an authorized human resolution.`,
     );
     return;
   }
 
-  let evaluated;
-  try {
-    evaluated = await runRemoteEvaluator({
-      endpoint: `${config.evaluatorApiUrl.replace(/\/$/, "")}/evaluations`,
-      token: config.evaluatorApiToken,
-      repositoryUrl: String(handoff.repositoryUrl),
-      branch: String(handoff.branch),
-      revision: String(handoff.candidateRevision),
-      branchRevision: String(handoff.branchRevision),
-      workItem,
-      intentRef,
-      contractRef,
-      evidenceRef,
-      intentText: await readArtifactRef(intentRef, config.intentBacklogApiBase, productRepositoryReadToken),
-      contractText: await readArtifactRef(contractRef, config.intentBacklogApiBase, productRepositoryReadToken),
-      evidenceText: await readArtifactRef(evidenceRef, config.intentBacklogApiBase, productRepositoryReadToken),
-      packagePath: String(handoff.packagePath),
-    });
-  } catch (err) {
-    await commentOnCard(
-      cardId,
-      `❌ Evaluator could not start: ${err instanceof Error ? err.message : String(err)}. Card remains in ${getWorkflowStageLabel("evaluation")}.`,
-    );
-    return;
-  }
-
-  if (!evaluated.evaluation || !evaluated.evaluationPackage) {
-    await commentOnCard(
-      cardId,
-      `❌ Evaluator produced no parseable result (exit code ${evaluated.exitCode}). Card remains in ${getWorkflowStageLabel("evaluation")} for investigation.\n\n\`\`\`\n${evaluated.rawOutput.slice(-1500)}\n\`\`\``,
-    );
-    return;
-  }
-  const evaluationPackage = evaluated.evaluationPackage;
-  if (
-    evaluationPackage.repositoryUrl.replace(/\.git$/i, "") !== String(handoff.repositoryUrl).replace(/\.git$/i, "") ||
-    evaluationPackage.branch !== String(handoff.branch) ||
-    evaluationPackage.candidateRevision !== String(handoff.candidateRevision) ||
-    evaluationPackage.path !== String(handoff.packagePath) ||
-    !/^[0-9a-f]{40}$/i.test(evaluationPackage.packageRevision) ||
-    !/^[0-9a-f]{64}$/i.test(evaluationPackage.sha256)
-  ) {
-    await commentOnCard(
-      cardId,
-      "Evaluator returned an Evaluation Package reference that does not match this candidate handoff. The card remains in Evaluation for investigation.",
-    );
-    return;
-  }
-
-  const status = String(evaluated.evaluation.status ?? "unknown");
-  const summary = String(evaluated.evaluation.summary ?? "(no summary)");
-  const findings = Array.isArray(evaluated.evaluation.findings)
-    ? (evaluated.evaluation.findings as Array<Record<string, unknown>>)
-    : [];
-  let comment = `🔎 Evaluator finished: **${status.toUpperCase()}**\n\n${summary}`;
-  if (findings.length > 0) {
-    comment += "\n\n**Findings**";
-    for (const finding of findings.slice(0, 10)) {
-      comment += `\n- ${finding.id ?? "finding"} [${finding.severity ?? "unknown"}]: ${finding.problem ?? "(no description)"}`;
+  const run: StageRun = { invocation, result };
+  const packageRef = (result.output_artifacts as Record<string, unknown>[])[0];
+  const target = invocation.target as Record<string, unknown>;
+  const reads = await productReads(String(target.repository));
+  const { pkg, issues } = await verifyPushedPackage({
+    ref: packageRef,
+    branch: String(invocation.workspace_ref),
+    handoff: String(target.commit_sha),
+    definition: "EvaluationPackage",
+    reads,
+    validator: lifecycleValidator,
+  });
+  if (pkg && !issues.length) {
+    if (!isDeepStrictEqual(pkg.candidate, execution.result.candidate)) {
+      issues.push("The Evaluation Package evaluated a different candidate than the one supplied.");
+    }
+    if (pkg.status !== status) issues.push("The Evaluation Package status differs from the StageResult status.");
+    if (status === "pass") {
+      const contractRef = workContractRef(invocation);
+      const contract = parseYaml(
+        (await reads.fileAt(String(contractRef.commit_sha), String(contractRef.path))).toString("utf8"),
+      ) as { required_validation?: { name: string }[] };
+      issues.push(
+        ...compareRequiredValidation(
+          contract.required_validation ?? [],
+          (pkg.checks as Record<string, unknown>[]) ?? [],
+          "The Evaluation Package",
+        ),
+      );
     }
   }
-  const decisionBrief = evaluated.evaluation.decisionBrief as Record<string, unknown> | undefined;
-  if (status === "needs_decision" && decisionBrief) {
-    const facts = Array.isArray(decisionBrief.knownFacts) ? decisionBrief.knownFacts : [];
-    const inferences = Array.isArray(decisionBrief.evaluatorInferences) ? decisionBrief.evaluatorInferences : [];
-    const options = Array.isArray(decisionBrief.options)
-      ? (decisionBrief.options as Array<Record<string, unknown>>)
-      : [];
-    comment += `\n\n## Human Decision Required\n\n**Decision:** ${decisionBrief.decisionRequired ?? "Not provided"}\n\n**Why now:** ${decisionBrief.whyNow ?? "Not provided"}`;
-    if (facts.length) comment += `\n\n**Known facts**\n${facts.map((fact) => `- ${String(fact)}`).join("\n")}`;
-    if (inferences.length)
-      comment += `\n\n**Evaluator inferences**\n${inferences.map((inference) => `- ${String(inference)}`).join("\n")}`;
-    if (options.length)
-      comment += `\n\n**Options**\n${options.map((option) => `- ${String(option.option ?? "Option")}: ${String(option.impact ?? "Impact not provided")}`).join("\n")}`;
-    comment += `\n\n**If no decision is made:** ${decisionBrief.consequenceOfNoDecision ?? "Work remains blocked."}`;
+  const current = await getCard(cardId);
+  if (!freezeStillActive(current, invocation)) {
+    issues.push("The freeze that authorized this evaluation is no longer active; the result is superseded.");
   }
-  await commentOnCard(cardId, comment);
-  await commentOnCard(
-    cardId,
-    `Evaluation Package published at \`${evaluationPackage.path}\` on \`${evaluationPackage.branch}\` (package commit \`${evaluationPackage.packageRevision}\`, candidate \`${evaluationPackage.candidateRevision}\`, SHA-256 \`${evaluationPackage.sha256}\`).`,
-  );
+  if (!(await recordDecision(cardId, run, packageRef, issues))) {
+    await commentOnCard(cardId, `⏸️ The evaluation result was not routed. The card stays in Evaluation for triage.`);
+    return;
+  }
 
-  if (status === "pass") {
-    const humanApprovalListId = getWorkflowListId("humanApproval");
-    await moveCard(cardId, humanApprovalListId);
-    await commentOnCard(
-      cardId,
-      "✅ Independent evaluation passed. Awaiting Human Approval. Trello Orchestrator never moves work to Done.",
-    );
-  } else if (status === "fail") {
-    await commentOnCard(
-      cardId,
-      `↩️ Independent evaluation failed. Findings require implementation rework. Card remains in ${getWorkflowStageLabel("evaluation")}; automatic retry is intentionally not enabled in v0.1.`,
-    );
-  } else if (status === "needs_decision") {
-    // Keep the request in Evaluation; the card move itself remains human-authorized.
-    await commentOnCard(
-      cardId,
-      "❓ Evaluator requires human judgment. The decision brief above contains the evidence, options, and consequence of waiting.",
-    );
-  } else {
-    await commentOnCard(
-      cardId,
-      `⚠️ Unknown evaluator status \`${status}\`. Card remains in ${getWorkflowStageLabel("evaluation")}.`,
-    );
+  const route = routeEvaluation(pkg!.status, pkg!.findings);
+  switch (route) {
+    case "human_approval":
+      await moveCard(cardId, getWorkflowListId("humanApproval"));
+      await commentOnCard(
+        cardId,
+        "✅ Independent evaluation passed and was verified. Awaiting Human Approval; the Orchestrator never approves or releases.",
+      );
+      return;
+    case "execution_rework": {
+      const freezeEventId = (invocation.freeze_activation as Record<string, unknown>).event_id;
+      const used = reworkCount(comments, freezeEventId);
+      if (used >= config.evaluationReworkLimit) {
+        await commentOnCard(
+          cardId,
+          `↩️ Evaluation failed on implementation findings, but ${used} automatic rework run(s) have already been made under this freeze (limit ${config.evaluationReworkLimit}). The card stays in Evaluation for the accountable human.`,
+        );
+        return;
+      }
+      await commentOnCard(
+        cardId,
+        `↩️ Evaluation failed on implementation findings. Returning to ${getWorkflowStageLabel("execution")} for bounded rework (${used + 1} of ${config.evaluationReworkLimit}).`,
+      );
+      await moveCard(cardId, getWorkflowListId("execution"));
+      return;
+    }
+    case "hold_specification":
+      await commentOnCard(
+        cardId,
+        `⏸️ Evaluation found a defect in the accepted specification. A specification correction needs the accountable human: if it is non-material, the product owner may move the card to ${getWorkflowStageLabel("specDesign")}; a material change needs a successor intent.`,
+      );
+      return;
+    case "hold_policy":
+      await commentOnCard(
+        cardId,
+        "⏸️ Evaluation found a blocking policy finding. Policy decisions belong to the accountable human; the card stays in Evaluation.",
+      );
+      return;
+    default:
+      await commentOnCard(
+        cardId,
+        "❓ The Evaluator needs a human decision; see the findings above. The card stays in Evaluation.",
+      );
   }
+}
+
+/** Starts rework after an Evaluation -> Execution move, only when the newest evaluation routed there. */
+async function startRework(cardId: string, eventId: string): Promise<void> {
+  const card = await getCard(cardId);
+  if (card.idList !== getWorkflowListId("execution")) return;
+  const comments = await getCardComments(cardId);
+  const evaluation = latestStageRun(comments, "evaluation", cardId, lifecycleValidator);
+  const execution = latestStageRun(comments, "execution", cardId, lifecycleValidator);
+  const refuse = (reason: string) => commentOnCard(cardId, `⛔ Rework was not started: ${reason}`);
+  if (!evaluation || evaluation.result.status !== "fail") return refuse("the newest evaluation is not a failed one.");
+  if (!execution) return refuse("there is no recorded Execution run to rework.");
+  if (!acceptedDecisionFor(comments, evaluation.result.invocation_id)) {
+    return refuse("the newest evaluation has no accepted StageResultDecision.");
+  }
+  const evidenceRef = (execution.result.output_artifacts as Record<string, unknown>[])[0];
+  if (
+    !(evaluation.invocation.input_artifacts as Record<string, unknown>[]).some((ref) =>
+      isDeepStrictEqual(ref, evidenceRef),
+    )
+  ) {
+    return refuse("the newest evaluation did not evaluate the newest candidate.");
+  }
+  if (!freezeStillActive(card, execution.invocation)) return refuse("the freeze is no longer active.");
+
+  const packageRef = (evaluation.result.output_artifacts as Record<string, unknown>[])[0];
+  const target = evaluation.invocation.target as Record<string, unknown>;
+  const reads = await productReads(String(target.repository));
+  const { pkg, issues } = await verifyPushedPackage({
+    ref: packageRef,
+    branch: String(evaluation.invocation.workspace_ref),
+    handoff: String(target.commit_sha),
+    definition: "EvaluationPackage",
+    reads,
+    validator: lifecycleValidator,
+  });
+  if (!pkg || issues.length) return refuse(issues.join(" ") || "the Evaluation Package could not be read.");
+  if (routeEvaluation(pkg.status, pkg.findings) !== "execution_rework") {
+    return refuse("the evaluation's findings do not route to Execution; a human must resolve them.");
+  }
+  const freezeEventId = (execution.invocation.freeze_activation as Record<string, unknown>).event_id;
+  if (reworkCount(comments, freezeEventId) >= config.evaluationReworkLimit) {
+    return refuse(`the automatic rework limit (${config.evaluationReworkLimit}) for this freeze is reached.`);
+  }
+  enqueueCard({ kind: "rework", cardId, invocation: buildReworkInvocation(execution, evaluation, eventId) });
 }
 
 async function processSpecCard(cardId: string, approval: MoveApproval): Promise<void> {
@@ -902,11 +1108,16 @@ export function handleCardReadyForAgent(
   targetCommit: string,
   freezeActivation: Record<string, unknown>,
 ): void {
-  enqueueCard({ cardId, acceptance, workspaceRef, targetCommit, freezeActivation });
+  enqueueCard({ kind: "accepted", cardId, acceptance, workspaceRef, targetCommit, freezeActivation });
 }
 
-export function handleCardReviewForAgent(cardId: string): void {
-  enqueueReview(cardId);
+export function handleCardReviewForAgent(cardId: string, eventId: string): void {
+  enqueueReview(cardId, eventId);
+}
+
+/** An Evaluation -> Execution move: rework, if the newest verified evaluation routed there. */
+export async function handleCardRework(cardId: string, eventId: string): Promise<void> {
+  await startRework(cardId, eventId);
 }
 
 export function handleCardSpecAndDesign(cardId: string, approval: MoveApproval): void {

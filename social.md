@@ -169,3 +169,16 @@ old path, which is why it never failed.
   Acceptance already checks, so Execution works on any host.
 - **Bytes, not text.** The frozen intent copy is fetched as raw bytes, so a
   byte order mark or line-ending change cannot slip past the fingerprint.
+
+2026-11-01, overnight: Evaluation now follows the canonical contract end to end.
+The custom Evaluator handoff comment and request are gone. Execution and
+Evaluation runs are recorded on the card as StageInvocation and StageResult, and
+the Evaluation invocation is built from the recorded Execution run.
+
+- **Verified before routed.** Each pushed package is checked read-only on GitHub
+  (branch tip, parent chain, hash, schema, required checks), and the outcome is a
+  StageResultDecision on the card: accepted, or rejected with the reason.
+- **Rework is bounded and category-routed.** Only implementation or evidence
+  failures go back to Execution, at most twice per freeze by default. A spec or
+  policy defect waits for the accountable human.
+- **One client for both NAS workers,** since they share the same HTTP boundary.

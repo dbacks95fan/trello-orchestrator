@@ -16,6 +16,7 @@ import {
   handleCardPrioritized,
   handleCardReadyForAgent,
   handleCardReviewForAgent,
+  handleCardRework,
   handleCardSpecAndDesign,
 } from "./workflow/workflow.js";
 import { createLifecycleValidator } from "./contracts/lifecycle.js";
@@ -152,7 +153,10 @@ app.post("/webhooks/trello", async (req, res) => {
           return;
         }
         case "start_evaluation":
-          handleCardReviewForAgent(card.id);
+          handleCardReviewForAgent(card.id, transition.event_id);
+          return;
+        case "evaluation_implementation_rework":
+          await handleCardRework(card.id, transition.event_id);
           return;
         default:
           await commentOnCard(
