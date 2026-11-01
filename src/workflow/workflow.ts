@@ -122,7 +122,6 @@ async function processCard(execution: AcceptedExecution): Promise<void> {
       acceptance: execution.acceptance,
       workspaceRef: execution.workspaceRef,
       targetCommit: execution.targetCommit,
-      workspaceRoot: config.specWorkspaceRoot,
       intentBacklogApiBase: config.intentBacklogApiBase,
       intentBacklogReadToken: config.intentBacklogReadToken,
       createProductRepositoryReadToken: (repositoryUrl) =>

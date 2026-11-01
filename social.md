@@ -158,3 +158,14 @@ move (actor, time) to the newest `spec_ready` artifacts and records it.
   failed, an earlier ready spec is not silently accepted.
 - **The hand-written record path was removed** rather than kept alongside, so
   there is one way to accept a spec.
+Later still on 2026-10-31: Execution no longer reads a local product clone. It
+looked for the accepted work at `SPEC_WORKSPACE_ROOT/<intent-id>`, but Spec &
+Design runs in `<intent-id>-<invocation-id>/repository`, so a new card would have
+stopped at Execution. The one end-to-end test had built its repository at the
+old path, which is why it never failed.
+
+- **Read from GitHub at the accepted commit.** The branch tip and the frozen
+  intent copy come from the product repository's API, the same source Spec
+  Acceptance already checks, so Execution works on any host.
+- **Bytes, not text.** The frozen intent copy is fetched as raw bytes, so a
+  byte order mark or line-ending change cannot slip past the fingerprint.
