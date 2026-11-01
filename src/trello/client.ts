@@ -197,12 +197,37 @@ export async function getCardsInList(listId: string): Promise<TrelloCard[]> {
   return trelloFetch<TrelloCard[]>(`/lists/${listId}/cards`);
 }
 
-export async function moveCard(cardId: string, listId: string): Promise<void> {
+/**
+ * The only moves the Orchestrator makes itself. It acts with the product owner's Trello identity, so a move it made
+ * out of Human Approval, Release, or Production Observation would be indistinguishable from the owner's decision.
+ */
+const ORCHESTRATOR_ROUTES: ReadonlyArray<readonly [keyof WorkflowListIds, keyof WorkflowListIds]> = [
+  ["execution", "evaluation"],
+  ["evaluation", "humanApproval"],
+  ["evaluation", "execution"],
+  ["prioritized", "backlog"],
+];
+
+export function isOrchestratorRoute(from: keyof WorkflowListIds, to: keyof WorkflowListIds): boolean {
+  return ORCHESTRATOR_ROUTES.some(([routeFrom, routeTo]) => routeFrom === from && routeTo === to);
+}
+
+/** Moves the card along an Orchestrator route; returns false, without moving it, if a person has moved it since. */
+export async function routeCard(
+  cardId: string,
+  from: keyof WorkflowListIds,
+  to: keyof WorkflowListIds,
+): Promise<boolean> {
+  if (!isOrchestratorRoute(from, to)) {
+    throw new Error(`The Orchestrator does not move cards from ${from} to ${to}; that move is a person's decision.`);
+  }
+  if ((await getCard(cardId)).idList !== getWorkflowListId(from)) return false;
   await trelloFetch(`/cards/${cardId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idList: listId }),
+    body: JSON.stringify({ idList: getWorkflowListId(to) }),
   });
+  return true;
 }
 
 export async function updateCardDescription(cardId: string, desc: string): Promise<void> {
@@ -213,7 +238,16 @@ export async function updateCardDescription(cardId: string, desc: string): Promi
   });
 }
 
+/**
+ * A person's written decision: Human Approval reads the owner's rationale from comments that start this way. The
+ * Orchestrator comments with the owner's Trello identity, so it never posts one, even when relaying agent text.
+ */
+export const HUMAN_DECISION_PREFIX = /^\s*(rationale|reason)\s*:\s*/i;
+
 export async function commentOnCard(cardId: string, text: string): Promise<void> {
+  if (HUMAN_DECISION_PREFIX.test(text)) {
+    throw new Error("The Orchestrator does not post comments that read as a person's written decision.");
+  }
   await trelloFetch(`/cards/${cardId}/actions/comments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -14,10 +14,11 @@ import {
   getCardComments,
   getWorkflowListId,
   getWorkflowStageLabel,
-  moveCard,
+  routeCard,
   updateCardDescription,
   type TrelloCard,
   type TrelloComment,
+  type WorkflowListIds,
 } from "../trello/client.js";
 import { config } from "../config.js";
 import { isUnderWipLimit } from "./wip.js";
@@ -377,7 +378,17 @@ async function runExecution(card: TrelloCard, invocation: Record<string, unknown
     cardId,
     `🔎 Candidate \`${String((result.candidate as Record<string, unknown>).commit_sha)}\` verified. Moving to ${getWorkflowStageLabel("evaluation")} for independent evaluation.`,
   );
-  await moveCard(cardId, getWorkflowListId("evaluation"));
+  await routeOrHold(cardId, "execution", "evaluation");
+}
+
+/** Moves the card along an Orchestrator route, or says why it stayed where a person put it. */
+async function routeOrHold(cardId: string, from: keyof WorkflowListIds, to: keyof WorkflowListIds): Promise<boolean> {
+  if (await routeCard(cardId, from, to)) return true;
+  await commentOnCard(
+    cardId,
+    `⏸️ The card was not moved to ${getWorkflowStageLabel(to)}: it had already been moved out of ${getWorkflowStageLabel(from)}, so it stays where it was put.`,
+  );
+  return false;
 }
 
 /** Runs the independent Evaluator on the newest verified candidate and routes its verified result. */
@@ -501,7 +512,7 @@ async function evaluateCard(cardId: string, eventId: string): Promise<void> {
   const route = routeEvaluation(pkg!.status, pkg!.findings);
   switch (route) {
     case "human_approval":
-      await moveCard(cardId, getWorkflowListId("humanApproval"));
+      if (!(await routeOrHold(cardId, "evaluation", "humanApproval"))) return;
       await commentOnCard(
         cardId,
         "✅ Independent evaluation passed and was verified. Awaiting Human Approval; the Orchestrator never approves or releases.",
@@ -521,7 +532,7 @@ async function evaluateCard(cardId: string, eventId: string): Promise<void> {
         cardId,
         `↩️ Evaluation failed on implementation findings. Returning to ${getWorkflowStageLabel("execution")} for bounded rework (${used + 1} of ${config.evaluationReworkLimit}).`,
       );
-      await moveCard(cardId, getWorkflowListId("execution"));
+      await routeOrHold(cardId, "evaluation", "execution");
       return;
     }
     case "hold_specification":
@@ -1042,11 +1053,10 @@ export async function handleCardPrioritized(cardId: string, approval: MoveApprov
     );
     await commentOnCard(cardId, `🔒 Prioritized freeze activated.\n\n${JSON.stringify(projection, null, 2)}`);
   } catch (err) {
-    const backlogId = getWorkflowListId("backlog");
-    await moveCard(cardId, backlogId);
+    const returned = await routeOrHold(cardId, "prioritized", "backlog");
     await commentOnCard(
       cardId,
-      `⛔ Prioritized freeze was not activated; the card was returned to Backlog.\n\n${err instanceof Error ? err.message : String(err)}`,
+      `⛔ Prioritized freeze was not activated${returned ? "; the card was returned to Backlog" : ""}.\n\n${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }

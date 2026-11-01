@@ -190,3 +190,11 @@ that none was given; it is never invented. Release and Observation records are
 left alone on purpose: their owners (the release and observation controls) don't
 exist yet, and the canonical ReleaseRecord points at the approval with a Git
 ArtifactRef while the approval lives on the card, a gap flagged upstream.
+
+Later on 2026-11-01, after agentic-sdlc 208e32e: the rationale is now required,
+so a move without the owner's "Rationale:" comment records nothing and asks for
+one. The Orchestrator acts with the owner's own Trello identity, so Trello can't
+tell us apart; the guard is in code instead. Cards move only along four
+Orchestrator routes, and only from where the route starts, never out of Human
+Approval, Release, or Production Observation. No Orchestrator comment may start
+with "Rationale:" or "Reason:".

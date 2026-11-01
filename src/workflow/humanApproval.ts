@@ -2,7 +2,7 @@
 // ABOUTME: Records the Human Approval Record (and a Closure Record for a stop) when the product owner moves a card
 // ABOUTME: out of Human Approval. The move is the decision; the Conductor binds it to the newest verified pass.
 import type { LifecycleValidator } from "../contracts/lifecycle.js";
-import type { TrelloCard, TrelloComment } from "../trello/client.js";
+import { HUMAN_DECISION_PREFIX, type TrelloCard, type TrelloComment } from "../trello/client.js";
 import { activeFreezeForCard } from "./freezeState.js";
 import { HUMAN_RECORD_MARKER } from "./humanRecords.js";
 import { latestStageRun, newestFirst, parseMachineRecord } from "./stageRecords.js";
@@ -18,7 +18,7 @@ export interface HumanApprovalInput {
   /** Time of the move; becomes `recorded_at`. */
   recordedAt: string;
   decision: HumanApprovalDecision;
-  /** Board label of the destination, used in the default rationale. */
+  /** Board label of the destination, used in the instructions when no rationale was written. */
   destination: string;
   validator: LifecycleValidator;
 }
@@ -27,28 +27,18 @@ export type HumanApprovalOutcome =
   | { recorded: true; record: Record<string, unknown>; closure: Record<string, unknown> | null }
   | { recorded: false; reason: string };
 
-const RATIONALE_PREFIX = /^\s*(rationale|reason)\s*:\s*/i;
-
 /**
- * The owner's written reason: their newest comment starting with "Rationale:" or "Reason:", written
- * after the evaluation result. Without one, the record says plainly that none was given.
+ * The owner's written reason: their newest comment starting with "Rationale:" or "Reason:", written after the
+ * evaluation result. The canonical record requires a rationale, so there is no default.
  */
-function rationaleFor(
-  comments: TrelloComment[],
-  actorId: string,
-  after: string | undefined,
-  destination: string,
-): string {
+function rationaleFor(comments: TrelloComment[], actorId: string, after: string | undefined): string | null {
   const written = newestFirst(comments).find(
     (comment) =>
       comment.idMemberCreator === actorId &&
-      RATIONALE_PREFIX.test(comment.data?.text ?? "") &&
+      HUMAN_DECISION_PREFIX.test(comment.data?.text ?? "") &&
       (!after || !comment.date || Date.parse(comment.date) > Date.parse(after)),
   );
-  const text = written?.data?.text?.replace(RATIONALE_PREFIX, "").trim();
-  return (
-    text || `No written rationale was given; recorded from the product owner's move of the card to ${destination}.`
-  );
+  return written?.data?.text?.replace(HUMAN_DECISION_PREFIX, "").trim() || null;
 }
 
 export function humanRecordComment(definition: string, record: Record<string, unknown>, note: string): string {
@@ -97,7 +87,13 @@ export function recordHumanApproval(input: HumanApprovalInput): HumanApprovalOut
     (comment) =>
       parseMachineRecord(comment.data?.text ?? "", "stage-result")?.invocation_id === evaluation.result.invocation_id,
   )?.date;
-  const rationale = rationaleFor(comments, input.actorId, evaluatedAt, input.destination);
+  const rationale = rationaleFor(comments, input.actorId, evaluatedAt);
+  if (!rationale) {
+    return {
+      recorded: false,
+      reason: `No rationale was written. Add a comment that starts with "Rationale:" and explains the decision, move the card back to Human Approval, then move it to ${input.destination} again.`,
+    };
+  }
 
   const record = {
     schema_version: "1.0",
