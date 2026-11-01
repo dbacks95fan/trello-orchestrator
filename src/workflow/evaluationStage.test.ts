@@ -8,6 +8,7 @@ import { config } from "../config.js";
 import {
   buildEvaluationInvocation,
   buildReworkInvocation,
+  comparePolicyEvidence,
   compareRequiredValidation,
   isRework,
   routeEvaluation,
@@ -285,4 +286,20 @@ test("a StageResultDecision validates, and a rejection carries its reason", () =
   });
   assert.deepEqual(validator.validate("StageResultDecision", rejected).errors, []);
   assert.equal(validator.validate("StageResultDecision", { ...rejected, reason: undefined }).valid, false);
+});
+
+test("every accepted policy control needs evidence marked addressed; an agent cannot mark one not applicable", () => {
+  const controls = [{ control_id: "SEC-BASE-001" }, { control_id: "PRIV-002" }];
+  assert.deepEqual(
+    comparePolicyEvidence(controls, [
+      { control_id: "SEC-BASE-001", outcome: "addressed" },
+      { control_id: "PRIV-002", outcome: "addressed" },
+    ]),
+    [],
+  );
+  assert.deepEqual(comparePolicyEvidence(controls, [{ control_id: "SEC-BASE-001", outcome: "not_applicable" }]), [
+    "The Evidence Package marks policy control SEC-BASE-001 as not_applicable, not addressed.",
+    "The Evidence Package has no evidence for policy control PRIV-002.",
+  ]);
+  assert.deepEqual(comparePolicyEvidence([], []), []);
 });

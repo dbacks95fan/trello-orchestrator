@@ -108,6 +108,26 @@ export function compareRequiredValidation(
   return issues;
 }
 
+/**
+ * Stage Contracts §4: policy-control evidence is compared to the accepted controls, and an agent
+ * cannot mark a control not applicable on its own. Every control needs evidence `addressed`.
+ */
+export function comparePolicyEvidence(
+  controls: { control_id: string }[],
+  evidence: { control_id?: unknown; outcome?: unknown }[],
+): string[] {
+  const issues: string[] = [];
+  for (const control of controls) {
+    const entry = evidence.find((item) => item.control_id === control.control_id);
+    if (!entry) issues.push(`The Evidence Package has no evidence for policy control ${control.control_id}.`);
+    else if (entry.outcome !== "addressed")
+      issues.push(
+        `The Evidence Package marks policy control ${control.control_id} as ${String(entry.outcome)}, not addressed.`,
+      );
+  }
+  return issues;
+}
+
 export interface PackageReads {
   branchTip(branch: string): Promise<string>;
   fileAt(commit: string, path: string): Promise<Buffer>;
