@@ -1,8 +1,8 @@
 // Copyright (c) 2026 DPSystems, LLC.
-// ABOUTME: Verifies the Orchestrator submits a StageInvocation to the Coding Agent service and handles every service outcome.
+// ABOUTME: Verifies the Orchestrator submits a StageInvocation to a stage worker service and handles every service outcome.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runCodingAgent, type CodingAgentRunOptions, type FetchRequest } from "./runCodingAgent.js";
+import { runStageAgent, type StageAgentRunOptions, type FetchRequest } from "./runStageAgent.js";
 
 const invocation = {
   invocation_id: "invocation-1",
@@ -51,8 +51,9 @@ function scripted(responses: Array<Response | Error>): { requestFn: FetchRequest
   return { requestFn, requests };
 }
 
-function options(requestFn: FetchRequest, overrides: Partial<CodingAgentRunOptions> = {}): CodingAgentRunOptions {
+function options(requestFn: FetchRequest, overrides: Partial<StageAgentRunOptions> = {}): StageAgentRunOptions {
   return {
+    serviceName: "Coding Agent",
     endpoint: "http://coding-agent.test:8081/",
     token: "test-token",
     pollIntervalMs: 10,
@@ -70,7 +71,7 @@ test("submits the invocation with bearer authentication and polls until the run 
     Response.json(running),
     Response.json(done),
   ]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
 
   assert.equal(result.error, null);
   assert.equal(result.stageResult?.status, "candidate_complete");
@@ -89,14 +90,14 @@ test("submits the invocation with bearer authentication and polls until the run 
 
 test("returns an already finished run without polling", async () => {
   const { requestFn, requests } = scripted([Response.json(done)]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.equal(result.stageResult?.invocation_id, "invocation-1");
   assert.equal(requests.length, 1);
 });
 
 test("a finished run without a stage result is returned as such for the workflow to reject", async () => {
   const { requestFn } = scripted([Response.json({ ...done, stage_result: null, evidence_package: null })]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.equal(result.error, null);
   assert.equal(result.stageResult, null);
   assert.deepEqual(result.diagnostics, { reasons: [] });
@@ -104,7 +105,7 @@ test("a finished run without a stage result is returned as such for the workflow
 
 test("reports a rejected API token", async () => {
   const { requestFn } = scripted([Response.json({ error: "unauthorized" }, { status: 401 })]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.equal(result.stageResult, null);
   assert.match(result.error ?? "", /rejected the Orchestrator's API token/);
 });
@@ -113,27 +114,27 @@ test("reports a busy service instead of retrying the submission", async () => {
   const { requestFn, requests } = scripted([
     Response.json({ error: "busy", running_invocation_id: "other" }, { status: 409 }),
   ]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.match(result.error ?? "", /busy/);
   assert.equal(requests.length, 1);
 });
 
 test("reports other refusals with their HTTP status", async () => {
   const { requestFn } = scripted([Response.json({ error: "body is not a StageInvocation" }, { status: 400 })]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.match(result.error ?? "", /HTTP 400/);
   assert.match(result.rawOutput, /not a StageInvocation/);
 });
 
 test("reports an unreachable service", async () => {
   const { requestFn } = scripted([new Error("connect ECONNREFUSED")]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.match(result.error ?? "", /could not be reached: connect ECONNREFUSED/);
 });
 
 test("reports a non-JSON submission response", async () => {
   const { requestFn } = scripted([new Response("<html>proxy error</html>", { status: 202 })]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.match(result.error ?? "", /not JSON/);
 });
 
@@ -142,7 +143,7 @@ test("treats an unknown invocation during polling as an unknown outcome", async 
     Response.json(running, { status: 202 }),
     Response.json({ error: "unknown invocation_id" }, { status: 404 }),
   ]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.match(result.error ?? "", /no longer knows invocation invocation-1/);
 });
 
@@ -153,7 +154,7 @@ test("tolerates a transient poll failure and recovers", async () => {
     new Error("socket hang up"),
     Response.json(done),
   ]);
-  const result = await runCodingAgent(invocation, options(requestFn, { log: (message) => messages.push(message) }));
+  const result = await runStageAgent(invocation, options(requestFn, { log: (message) => messages.push(message) }));
   assert.equal(result.stageResult?.status, "candidate_complete");
   assert.deepEqual(messages, ["Coding Agent status poll 1/3 failed for invocation invocation-1."]);
 });
@@ -165,7 +166,7 @@ test("gives up after repeated poll failures", async () => {
     new Response("bad gateway", { status: 502 }),
     new Error("down"),
   ]);
-  const result = await runCodingAgent(invocation, options(requestFn));
+  const result = await runStageAgent(invocation, options(requestFn));
   assert.match(result.error ?? "", /could not be read 3 times in a row/);
   assert.equal(requests.length, 4);
 });
@@ -178,7 +179,7 @@ test("stops waiting at the timeout and says the run may still be going", async (
     Response.json(running),
     Response.json(running),
   ]);
-  const result = await runCodingAgent(
+  const result = await runStageAgent(
     invocation,
     options(requestFn, {
       timeoutMs: 25,
@@ -190,4 +191,22 @@ test("stops waiting at the timeout and says the run may still be going", async (
   );
   assert.match(result.error ?? "", /did not finish invocation invocation-1 within 25 ms/);
   assert.equal(requests.length, 4);
+});
+
+test("the Evaluator's package is returned and messages name the Evaluator service", async () => {
+  const evaluated = {
+    invocation_id: "invocation-1",
+    state: "done",
+    stage_result: { ...stageResult, stage: "evaluation", status: "pass" },
+    evaluation_package: { schema_version: "1.0", status: "pass" },
+    diagnostics: { reasons: [], checks: [] },
+  };
+  const { requestFn } = scripted([Response.json(evaluated, { status: 200 })]);
+  const result = await runStageAgent(invocation, options(requestFn, { serviceName: "Evaluator" }));
+  assert.deepEqual(result.evaluationPackage, { schema_version: "1.0", status: "pass" });
+  assert.equal(result.evidencePackage, null);
+
+  const { requestFn: refusing } = scripted([new Response("no", { status: 401 })]);
+  const refused = await runStageAgent(invocation, options(refusing, { serviceName: "Evaluator" }));
+  assert.equal(refused.error, "The Evaluator service rejected the Orchestrator's API token (HTTP 401).");
 });

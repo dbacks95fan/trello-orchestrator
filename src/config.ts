@@ -63,8 +63,13 @@ export const config = {
   orchestratorGithubAppId: process.env.ORCHESTRATOR_GITHUB_APP_ID ?? "",
   orchestratorGithubAppInstallationId: process.env.ORCHESTRATOR_GITHUB_APP_INSTALLATION_ID ?? "",
   orchestratorGithubAppPrivateKeyFile: process.env.ORCHESTRATOR_GITHUB_APP_PRIVATE_KEY_FILE ?? "",
+  // The Evaluator service base URL; it exposes the same /invocations boundary as the Coding Agent.
   evaluatorApiUrl: required("EVALUATOR_API_URL"),
   evaluatorApiToken: required("EVALUATOR_API_TOKEN"),
+  evaluatorPollIntervalMs: Number(process.env.EVALUATOR_POLL_INTERVAL_MS ?? "15000"),
+  evaluatorTimeoutMs: Number(process.env.EVALUATOR_TIMEOUT_MS ?? "3600000"),
+  // Automatic Evaluation -> Execution rework runs allowed under one freeze before a human must step in.
+  evaluationReworkLimit: Number(process.env.EVALUATION_REWORK_LIMIT ?? "2"),
   targetRepo,
   // Where the isolated per-work-item clones are created before being bind-mounted
   // into the container at /work.

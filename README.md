@@ -20,8 +20,9 @@ for any product board, but simultaneous multi-board processing is not supported.
 | Backlog → Prioritized | Validate the pinned intent/profile and product-owner ID; record schema-valid freeze activation data and the current projection. |
 | Prioritized → Spec & Design | Verify the active freeze, record a StageInvocation, and invoke Spec & Design. Only a schema-valid Work Contract v3 bound to frozen inputs can be reported ready for human review. |
 | Spec & Design → Execution | The product owner's move is the acceptance. Build the `SpecAcceptanceRecord` from that move and the latest `spec_ready` result, retrieve the referenced spec and Work Contract from GitHub, verify hashes, validate Work Contract v3 against the active freeze, and record it on the card. |
-| Execution (entry) | Build StageInvocation 1.1 from the accepted artifacts and submit it to the Coding Agent service on the NAS. Validate its StageResult and Evidence Package, record the Evaluator handoff, and move a `candidate_complete` card to Evaluation. |
-| Evaluation (entry) | Call the NAS Evaluator with the candidate SHA and the exact contract, evidence, and intent bytes. Validate the returned Evaluation Package reference and move a `pass` to Human Approval. `fail` and `needs_decision` stay in Evaluation. |
+| Execution (entry) | Build StageInvocation 1.1 from the accepted artifacts and submit it to the Coding Agent service on the NAS. Record the invocation and StageResult on the card, verify the pushed candidate and Evidence Package read-only on GitHub, compare its checks to the accepted contract, record a StageResultDecision, and move a verified `candidate_complete` card to Evaluation. |
+| Evaluation (entry) | Build an Evaluation StageInvocation 1.1 from the recorded Execution run and submit it to the NAS Evaluator. Record its StageResult, verify the pushed Evaluation Package, and record a StageResultDecision. `pass` moves to Human Approval; a `fail` with only implementation or evidence findings returns to Execution for bounded rework; a specification or policy finding, `needs_decision`, `blocked`, and `failed` stay in Evaluation for the accountable human. |
+| Evaluation -> Execution | Rework: send the Coding Agent the last Execution inputs plus the failing Evaluation Package, at most `EVALUATION_REWORK_LIMIT` times per freeze. |
 | Human Approval and later | Check in-order movement and product-owner identity only. Human Approval, Release, Production Observation, and Done records are not yet validated. |
 
 Returning a card from Prioritized or Spec & Design to Backlog or New Ideas
@@ -40,8 +41,9 @@ and pushes its own output to `work/<intent-id>`: the Spec & Design Agent its
 spec and Work Contract, the Coding Agent its candidate and Evidence Package,
 and the Evaluator its Evaluation Package. The Orchestrator reads the returned
 references, checks them with a read-only GitHub App token, and records them on
-the card. The Evaluator runs on the NAS; it checks out the candidate SHA into
-temporary container storage and removes the checkout before responding.
+the card. The Coding Agent and Evaluator run on the NAS behind the same HTTP
+boundary (`POST /invocations`, then `GET /invocations/{id}`), so one client in
+`src/stageAgent/runStageAgent.ts` serves both.
 
 ## Structure
 
@@ -74,15 +76,15 @@ src/
 │   ├── specAcceptance.ts          builds the SpecAcceptanceRecord from the owner's move to Execution
 │   ├── humanRecords.ts            verifies a SpecAcceptanceRecord against the freeze and GitHub artifact bytes
 │   ├── acceptedExecutionContract.ts  revalidates acceptance and builds the Execution StageInvocation
+│   ├── stageRecords.ts            reads/writes StageInvocation, StageResult, and StageResultDecision card comments
+│   ├── evaluationStage.ts         builds Evaluation and rework invocations, verifies pushed packages, routes results
+│   ├── githubRead.ts              read-only GitHub lookups: branch tip, commit parents, file bytes at a commit
 │   ├── codingContractAdapter.ts   checks accepted validation names/commands against the supported gates
 │   └── contractFromCard.ts        Work Contract type shared by the adapter
-├── codingAgent/
-│   └── runCodingAgent.ts          submits to the NAS Coding Agent service and polls for its result
-├── specDesignAgent/
-│   └── runSpecDesignAgent.ts      runs the spec-design-agent image as a one-shot container
-└── evaluatorAgent/
-    ├── gitHandoff.ts              builds the read-only Evaluator handoff from Coding Agent references
-    └── remote.ts                  authenticated request to the NAS Evaluator
+├── stageAgent/
+│   └── runStageAgent.ts           submits to a NAS stage worker (Coding Agent or Evaluator) and polls for its result
+└── specDesignAgent/
+    └── runSpecDesignAgent.ts      runs the spec-design-agent image as a one-shot container
 ```
 
 Grouped by concern rather than kept flat: `trello/` is everything that talks to
@@ -218,20 +220,28 @@ records remain manual and are not enforced by this build.
    rejected token, busy service, timeout, or lost run leaves the card in
    Execution with a comment for human triage.
 7. The Coding Agent commits and pushes the candidate and its Evidence Package
-   itself. For a `candidate_complete` result, the Orchestrator validates the
-   StageResult and Evidence Package against the canonical schema and writes the
-   repository URL, candidate SHA, and artifact references to the Evaluator
-   handoff comment, then moves the card to Evaluation.
+   itself. The Orchestrator records the StageInvocation and StageResult on the
+   card, then checks read-only on GitHub that the branch tip is the Evidence
+   Package commit, its parent is the candidate, the candidate's parent is the
+   handoff, the package bytes hash and validate, and every required check from
+   the accepted Work Contract passed. It records a StageResultDecision and moves
+   a verified `candidate_complete` card to Evaluation.
 8. When the card enters the configured `Evaluation` list ID, the Orchestrator
-   calls the authenticated `EVALUATOR_API_URL` endpoint. The Evaluator checks
-   out the supplied SHA into request-scoped temporary storage, evaluates it,
-   publishes its Evaluation Package to the work branch, and returns its result
-   and the package reference.
-9. A non-candidate Coding Agent result leaves the card in Execution. A passing
-   Evaluation moves the card to Human Approval. A failing evaluation stays in
-   Evaluation; the rework route back to Execution is not built yet. Later human
-   records and Release/Observation/Done transitions are not yet enforced. The
-   Orchestrator never moves a card to Done.
+   builds an Evaluation StageInvocation 1.1 from the recorded Execution run (the
+   accepted spec and contract plus the Evidence Package, targeting the evidence
+   commit) and submits it to `EVALUATOR_API_URL/invocations`. The Evaluator
+   reruns the checks at the exact candidate, reviews it, and pushes its
+   Evaluation Package. The Orchestrator verifies that package (tip, parent,
+   hash, schema, same candidate, and for `pass` every required check) and
+   records a StageResultDecision.
+9. A verified `pass` moves to Human Approval. A verified `fail` whose blocking
+   findings are all implementation or evidence findings moves back to Execution;
+   that move starts a rework run with the Evaluation Package as input, at most
+   `EVALUATION_REWORK_LIMIT` (default 2) times per freeze. Specification or
+   policy findings, `needs_decision`, `blocked`, and `failed` stay in Evaluation
+   for the accountable human. A non-candidate Coding Agent result stays in
+   Execution. Later human records and Release/Observation/Done transitions are
+   not yet enforced. The Orchestrator never moves a card to Done.
 
 ## Setup
 
@@ -275,10 +285,9 @@ The Orchestrator runtime file also needs `ORCHESTRATOR_GITHUB_APP_ID`,
 Orchestrator's external config directory. The Orchestrator mints a repository-
 scoped read token when it fetches product artifacts. Keep
 `INTENT_BACKLOG_READ_TOKEN` for the private intent-backlog repository only.
-The Evaluator runtime file needs `EVALUATOR_ALLOWED_REPOSITORY_URLS` and its
-own GitHub App ID, installation ID, and private-key path. Evaluator mints a
-read-only token for checkout and a separate write token only to publish the
-Evaluation Package on the assigned work branch.
+The Evaluator (port 8080) uses the same check manifest as the Coding Agent and
+its own GitHub App; see the evaluator-agent README. `EVALUATOR_POLL_INTERVAL_MS`
+and `EVALUATOR_TIMEOUT_MS` mirror the Coding Agent settings.
 For the Spec & Design trigger, build and deploy the agent image on this host from
 the [spec-design-agent](https://github.com/dbacks95fan/spec-design-agent) repo:
 

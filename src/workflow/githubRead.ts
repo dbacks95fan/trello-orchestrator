@@ -45,6 +45,19 @@ export async function readBranchTip(options: GitHubReadOptions & { branch: strin
   return sha;
 }
 
+/** The parent commit SHAs of one commit. */
+export async function readCommitParents(options: GitHubReadOptions & { commit: string }): Promise<string[]> {
+  const fetchFn = options.fetchFn ?? fetch;
+  if (!/^[0-9a-f]{40,64}$/.test(options.commit)) throw new Error("Parents can only be read for a full commit SHA.");
+  const response = await fetchFn(`${repositoryApi(options)}/git/commits/${options.commit}`, {
+    headers: headers(options.token, "application/vnd.github+json"),
+  });
+  if (!response.ok)
+    throw new Error(`GitHub returned HTTP ${response.status} while reading commit ${options.commit.slice(0, 12)}.`);
+  const commit = (await response.json()) as { parents?: { sha?: unknown }[] };
+  return (commit.parents ?? []).map((parent) => String(parent.sha ?? ""));
+}
+
 /** A committed file's raw bytes. Bytes, not text, so a fingerprint check sees exactly what Git stores. */
 export async function readFileAtCommit(options: GitHubReadOptions & { commit: string; path: string }): Promise<Buffer> {
   const fetchFn = options.fetchFn ?? fetch;
