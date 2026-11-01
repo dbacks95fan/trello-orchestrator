@@ -35,6 +35,7 @@ import { latestStageRun, machineRecordComment, parseMachineRecord, type StageRun
 import {
   buildEvaluationInvocation,
   buildReworkInvocation,
+  comparePolicyEvidence,
   compareRequiredValidation,
   isRework,
   routeEvaluation,
@@ -352,12 +353,16 @@ async function runExecution(card: TrelloCard, invocation: Record<string, unknown
     const contractRef = workContractRef(invocation);
     const contract = parseYaml(
       (await reads.fileAt(String(contractRef.commit_sha), String(contractRef.path))).toString("utf8"),
-    ) as { required_validation?: { name: string }[] };
+    ) as { required_validation?: { name: string }[]; policy_controls?: { control_id: string }[] };
     issues.push(
       ...compareRequiredValidation(
         contract.required_validation ?? [],
         (pkg.validation as Record<string, unknown>[]) ?? [],
         "The Evidence Package",
+      ),
+      ...comparePolicyEvidence(
+        contract.policy_controls ?? [],
+        (pkg.policy_control_evidence as Record<string, unknown>[]) ?? [],
       ),
     );
   }
