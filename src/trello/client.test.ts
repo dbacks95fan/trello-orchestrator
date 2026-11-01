@@ -101,3 +101,88 @@ test("uses ProductConfig 1.1 list IDs even when board lists have custom names", 
 
   assert.equal(requests.length, 1);
 });
+
+test("the Orchestrator moves cards only along its own routes, and only from where the route starts", async () => {
+  const lists = {
+    new_ideas: "id-new",
+    backlog: "id-backlog",
+    prioritized: "id-prioritized",
+    spec_design: "id-spec",
+    execution: "id-execution",
+    evaluation: "id-evaluation",
+    human_approval: "id-approval",
+    release: "id-release",
+    production_observation: "id-observation",
+    done: "id-done",
+  };
+  let cardList = "id-evaluation";
+  const moves: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.includes("/boards/")) return Response.json(Object.values(lists).map((id) => ({ id, name: id, pos: 1 })));
+    if (init?.method === "PUT") {
+      moves.push(String(JSON.parse(String(init.body)).idList));
+      return Response.json({});
+    }
+    return Response.json({ id: "card-1", idList: cardList });
+  };
+
+  try {
+    const { getWorkflowListIds, isOrchestratorRoute, routeCard } = await import("./client.js");
+    await getWorkflowListIds({
+      schema_version: "1.1",
+      trello_board_id: "0123456789abcdef01234567",
+      trello_lists: lists,
+    });
+
+    for (const [from, to] of [
+      ["execution", "evaluation"],
+      ["evaluation", "humanApproval"],
+      ["evaluation", "execution"],
+      ["prioritized", "backlog"],
+    ] as const) {
+      assert.equal(isOrchestratorRoute(from, to), true, `${from} -> ${to}`);
+    }
+    for (const [from, to] of [
+      ["humanApproval", "release"],
+      ["humanApproval", "done"],
+      ["release", "productionObservation"],
+      ["productionObservation", "done"],
+      ["specDesign", "execution"],
+    ] as const) {
+      assert.equal(isOrchestratorRoute(from, to), false, `${from} -> ${to}`);
+      await assert.rejects(() => routeCard("card-1", from, to), /that move is a person's decision/);
+    }
+    assert.deepEqual(moves, []);
+
+    assert.equal(await routeCard("card-1", "evaluation", "humanApproval"), true);
+    assert.deepEqual(moves, ["id-approval"]);
+
+    cardList = "id-release";
+    assert.equal(await routeCard("card-1", "evaluation", "humanApproval"), false);
+    assert.deepEqual(moves, ["id-approval"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("the Orchestrator never posts a comment that reads as a person's written decision", async () => {
+  const posted: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    posted.push(String(JSON.parse(String(init?.body)).text));
+    return Response.json({});
+  };
+
+  try {
+    const { commentOnCard } = await import("./client.js");
+    for (const text of ["Rationale: ship it", "  reason : looks fine", "RATIONALE:approve"]) {
+      await assert.rejects(() => commentOnCard("card-1", text), /written decision/);
+    }
+    await commentOnCard("card-1", "⛔ The Human Approval decision was not recorded: Rationale: missing");
+    assert.deepEqual(posted, ["⛔ The Human Approval decision was not recorded: Rationale: missing"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

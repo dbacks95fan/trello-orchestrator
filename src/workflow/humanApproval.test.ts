@@ -141,8 +141,15 @@ function record(decision: HumanApprovalDecision, comments: TrelloComment[], theC
   });
 }
 
+const ownerRationale: TrelloComment = {
+  id: "r",
+  date: "2026-11-01T08:30:00.000Z",
+  idMemberCreator: "owner-1",
+  data: { text: "Rationale: QA checked the plan view." },
+};
+
 test("an approval binds the owner's move to the newest verified pass", () => {
-  const outcome = record("approved_for_integration_and_release", evaluationComments());
+  const outcome = record("approved_for_integration_and_release", [...evaluationComments(), ownerRationale]);
   assert.equal(outcome.recorded, true);
   if (!outcome.recorded) return;
   assert.deepEqual(validator.validate("HumanApprovalRecord", outcome.record).errors, []);
@@ -150,11 +157,21 @@ test("an approval binds the owner's move to the newest verified pass", () => {
   assert.deepEqual(outcome.record.evidence, evidenceRef);
   assert.deepEqual(outcome.record.evaluation, packageRef);
   assert.equal(outcome.record.authorized_by, "owner-1");
-  assert.match(
-    String(outcome.record.rationale),
-    /No written rationale was given; recorded from the product owner's move/,
-  );
+  assert.equal(outcome.record.rationale, "QA checked the plan view.");
   assert.equal(outcome.closure, null);
+});
+
+test("no decision is recorded until the owner writes a rationale after the evaluation", () => {
+  const stale = { ...ownerRationale, date: "2026-11-01T00:10:00.000Z" };
+  const empty = { ...ownerRationale, data: { text: "Rationale:   " } };
+  for (const comments of [evaluationComments(), [...evaluationComments(), stale], [...evaluationComments(), empty]]) {
+    const outcome = record("stopped", comments);
+    assert.equal(outcome.recorded, false);
+    assert.match(
+      !outcome.recorded ? outcome.reason : "",
+      /No rationale was written\. Add a comment that starts with "Rationale:".*move it to Release again/,
+    );
+  }
 });
 
 test("the owner's own Rationale comment written after the evaluation becomes the rationale", () => {
@@ -198,14 +215,21 @@ test("a stop also records a valid Closure Record", () => {
 });
 
 test("there is nothing to decide without a verified pass under the active freeze", () => {
-  const failed = record("approved_for_integration_and_release", evaluationComments("fail"));
+  const failed = record("approved_for_integration_and_release", [...evaluationComments("fail"), ownerRationale]);
   assert.equal(failed.recorded, false);
   assert.match(!failed.recorded ? failed.reason : "", /not a pass/);
 
-  const rejected = record("approved_for_integration_and_release", evaluationComments("pass", "rejected"));
+  const rejected = record("approved_for_integration_and_release", [
+    ...evaluationComments("pass", "rejected"),
+    ownerRationale,
+  ]);
   assert.match(!rejected.recorded ? rejected.reason : "", /no accepted StageResultDecision/);
 
-  const superseded = record("approved_for_integration_and_release", evaluationComments(), card("freeze-2"));
+  const superseded = record(
+    "approved_for_integration_and_release",
+    [...evaluationComments(), ownerRationale],
+    card("freeze-2"),
+  );
   assert.match(!superseded.recorded ? superseded.reason : "", /no longer active/);
 
   const none = record("approved_for_integration_and_release", []);
