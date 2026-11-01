@@ -250,7 +250,7 @@ export async function runSpecDesignAgent(
   });
 }
 
-/** Runs the bounded agent CLI on this machine, using its existing Codex login.
+/** Runs the bounded agent CLI on this machine, with its model key from the agent's runtime env file.
  *  This is useful for local development while production remains container-based. */
 async function runLocalSpecDesignAgent(
   request: SpecDesignRequest,

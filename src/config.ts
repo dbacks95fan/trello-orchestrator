@@ -43,7 +43,7 @@ export const config = {
   // the orchestrator only invokes `docker run` against it.
   specDesignDockerBin: process.env.SPEC_DESIGN_AGENT_DOCKER ?? "docker",
   specDesignImage: process.env.SPEC_DESIGN_AGENT_IMAGE ?? "spec-design-agent:local",
-  specDesignProvider: process.env.SPEC_DESIGN_AGENT_PROVIDER ?? "claude",
+  specDesignProvider: process.env.SPEC_DESIGN_AGENT_PROVIDER ?? "codex",
   specDesignKickoffMode: choice("SPEC_DESIGN_KICKOFF_MODE", ["auto", "manual"] as const, "auto"),
   specDesignRuntime: choice("SPEC_DESIGN_RUNTIME", ["docker", "local"] as const, "docker"),
   specDesignAgentDirectory: process.env.SPEC_DESIGN_AGENT_DIR ?? resolve(targetRepo, "..", "spec-design-agent"),
