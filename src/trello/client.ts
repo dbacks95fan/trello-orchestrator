@@ -37,6 +37,8 @@ export interface TrelloComment {
   id: string;
   /** ISO time Trello recorded the comment action. */
   date?: string;
+  /** Trello member who wrote the comment. */
+  idMemberCreator?: string;
   data: { text?: string };
 }
 

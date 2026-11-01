@@ -45,6 +45,7 @@ import {
   type PackageReads,
 } from "./evaluationStage.js";
 import { readBranchTip, readCommitParents, readFileAtCommit } from "./githubRead.js";
+import { humanRecordComment, recordHumanApproval, type HumanApprovalDecision } from "./humanApproval.js";
 
 const lifecycleValidator = createLifecycleValidator(config.lifecycleSchemaPath);
 
@@ -1115,6 +1116,66 @@ export function handleCardReviewForAgent(cardId: string, eventId: string): void 
   enqueueReview(cardId, eventId);
 }
 
+const humanApprovalDecisions = {
+  human_approve_release: { decision: "approved_for_integration_and_release", destination: "release" },
+  human_rework_execution: { decision: "return_to_execution", destination: "execution" },
+  human_rework_spec: { decision: "return_to_spec_and_design", destination: "specDesign" },
+  human_stop: { decision: "stopped", destination: "done" },
+} as const;
+
+export type HumanApprovalAction = keyof typeof humanApprovalDecisions;
+
+export function isHumanApprovalAction(action: string): action is HumanApprovalAction {
+  return action in humanApprovalDecisions;
+}
+
+/** A product owner's move out of Human Approval: record the decision against the newest verified pass. */
+export async function handleHumanApprovalMove(
+  cardId: string,
+  action: HumanApprovalAction,
+  actorId: string,
+  occurredAt: string,
+): Promise<void> {
+  const { decision, destination } = humanApprovalDecisions[action];
+  const card = await getCard(cardId);
+  const outcome = recordHumanApproval({
+    card,
+    comments: await getCardComments(cardId),
+    actorId,
+    recordedAt: occurredAt,
+    decision,
+    destination: getWorkflowStageLabel(destination),
+    validator: lifecycleValidator,
+  });
+  if (!outcome.recorded) {
+    await commentOnCard(cardId, `⛔ The Human Approval decision was not recorded: ${outcome.reason}`);
+    return;
+  }
+  const candidate = String((outcome.record.candidate as Record<string, unknown>).commit_sha);
+  await commentOnCard(
+    cardId,
+    humanRecordComment(
+      "HumanApprovalRecord",
+      outcome.record,
+      `🧑‍⚖️ Human Approval Record: **${decision}** for candidate \`${candidate}\`.`,
+    ),
+  );
+  if (outcome.closure) {
+    await commentOnCard(
+      cardId,
+      humanRecordComment("ClosureRecord", outcome.closure, "Closure Record: the work was stopped at Human Approval."),
+    );
+  }
+  const next: Record<HumanApprovalDecision, string> = {
+    approved_for_integration_and_release: `The authorized integration path may now merge candidate \`${candidate}\` into the protected integration branch and release it. The Orchestrator does not merge or release.`,
+    return_to_execution:
+      "Rework from a human decision after a passing evaluation is recorded but not started automatically: the Coding Agent accepts only durable findings (an Evaluation Package) as rework input.",
+    return_to_spec_and_design:
+      "A non-material specification correction is recorded but not started automatically: the Spec & Design Agent does not yet take correction findings as input.",
+    stopped: "The work is closed as stopped.",
+  };
+  await commentOnCard(cardId, next[decision]);
+}
 /** An Evaluation -> Execution move: rework, if the newest verified evaluation routed there. */
 export async function handleCardRework(cardId: string, eventId: string): Promise<void> {
   await startRework(cardId, eventId);

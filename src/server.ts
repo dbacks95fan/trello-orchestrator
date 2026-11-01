@@ -17,6 +17,8 @@ import {
   handleCardReadyForAgent,
   handleCardReviewForAgent,
   handleCardRework,
+  handleHumanApprovalMove,
+  isHumanApprovalAction,
   handleCardSpecAndDesign,
 } from "./workflow/workflow.js";
 import { createLifecycleValidator } from "./contracts/lifecycle.js";
@@ -159,6 +161,10 @@ app.post("/webhooks/trello", async (req, res) => {
           await handleCardRework(card.id, transition.event_id);
           return;
         default:
+          if (isHumanApprovalAction(action)) {
+            await handleHumanApprovalMove(card.id, action, transition.actor_id, transition.occurred_at);
+            return;
+          }
           await commentOnCard(
             card.id,
             `${action} was recorded as a board transition. This Orchestrator build does not automate that human-controlled downstream action.`,
