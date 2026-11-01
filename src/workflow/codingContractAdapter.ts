@@ -91,7 +91,7 @@ export function adaptAcceptedWorkContract(input: CodingContractAdapterInput): Wo
   const permitted = object(v3.permitted_scope)!;
   const acceptedIntentHash = sha256(input.frozenIntentBytes);
   if (acceptedIntentHash !== input.expected.intentSha256)
-    throw new Error("The frozen intent copy in the execution workspace has changed.");
+    throw new Error("The frozen intent copy on the work branch has changed.");
   const acceptanceWorkItem = object(acceptance.work_item);
   if (
     acceptance.decision !== "accepted_for_execution" ||

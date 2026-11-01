@@ -179,8 +179,11 @@ Spec & Design run against a real product repository has not yet been verified.
 
 After a valid acceptance, the Orchestrator checks that every `required_validation`
 name and command in the accepted contract is one the Coding Agent supports
-exactly, and blocks the card in Execution if not. It then sends the Coding Agent
-a StageInvocation 1.1 whose input artifacts are the accepted spec and Work
+exactly, and blocks the card in Execution if not. Every product-repository read
+for Execution goes to GitHub at the accepted commit, not a local clone: the
+`work/<intent-id>` tip must still equal that commit, and the frozen intent copy
+there must match the freeze fingerprint byte for byte. It then sends the Coding
+Agent a StageInvocation 1.1 whose input artifacts are the accepted spec and Work
 Contract. Later Human Approval, Release, Production Observation, and Done
 records remain manual and are not enforced by this build.
 
@@ -351,6 +354,3 @@ canonical deployment target.
 - **One board per instance.** Each running instance subscribes to the single
   board in `TRELLO_BOARD_ID`; the canonical multi-board registry is not
   implemented.
-- **Execution reads a local product clone.** Building the Execution invocation
-  runs read-only `git` commands against a clone under `SPEC_WORKSPACE_ROOT`, so
-  the Orchestrator must run on the host that ran Spec & Design.

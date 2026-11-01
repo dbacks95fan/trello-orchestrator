@@ -1,9 +1,7 @@
 // Copyright (c) 2026 DPSystems, LLC.
 // ABOUTME: Revalidates Spec Acceptance and builds the Coding Agent contract from canonical v3 artifacts.
-import { execFile } from "node:child_process";
+// ABOUTME: Every product-repository read goes to GitHub at the accepted commit, never a local workspace.
 import { randomUUID } from "node:crypto";
-import { promisify } from "node:util";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { LifecycleValidator } from "../contracts/lifecycle.js";
 import type { TrelloCard } from "../trello/client.js";
@@ -12,15 +10,12 @@ import { activeFreezeForCard } from "./freezeState.js";
 import { frozenArtifactSha256, resolveSpecRequest } from "./specRequestFromCard.js";
 import { readArtifactRef } from "./humanRecords.js";
 import { adaptAcceptedWorkContract } from "./codingContractAdapter.js";
-import { readCommittedWorkspaceFile } from "./specWorkspace.js";
+import { readBranchTip, readFileAtCommit } from "./githubRead.js";
 import type { WorkContractExpectation } from "./workContractV3.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface AcceptedExecutionContract {
   workContract: WorkContract;
   invocation: Record<string, unknown>;
-  repositoryPath: string;
   baseBranch: string;
 }
 
@@ -29,7 +24,6 @@ export interface AcceptedExecutionOptions {
   acceptance: Record<string, unknown>;
   workspaceRef: string;
   targetCommit: string;
-  workspaceRoot: string;
   intentBacklogApiBase: string;
   intentBacklogReadToken: string;
   createProductRepositoryReadToken: (repositoryUrl: string) => Promise<string>;
@@ -84,7 +78,6 @@ export async function loadAcceptedExecutionContract(
 
   if (options.workspaceRef !== `work/${resolved.intentId}`)
     throw new Error("The accepted Spec & Design invocation does not target the expected work branch.");
-  const repositoryPath = join(options.workspaceRoot, resolved.intentId);
   const [specText, contractText] = await Promise.all([
     readArtifactRef(
       acceptance.spec as Record<string, unknown>,
@@ -113,37 +106,31 @@ export async function loadAcceptedExecutionContract(
   if (targetCommit !== options.targetCommit)
     throw new Error("The accepted Work Contract target commit does not match its StageInvocation.");
 
-  const configuredRepository = resolved.productConfig.target_repository
-    .replace(/\.git$/, "")
-    .replace(/\/$/, "")
-    .toLowerCase();
-  const { stdout: originOutput } = await execFileAsync("git", ["config", "--get", "remote.origin.url"], {
-    cwd: repositoryPath,
-    windowsHide: true,
-  });
-  const origin = originOutput
-    .trim()
-    .replace(/\.git$/, "")
-    .replace(/\/$/, "")
-    .toLowerCase();
-  if (origin !== configuredRepository)
-    throw new Error("The isolated Spec & Design workspace origin does not match product.yaml target_repository.");
-  const { stdout: branchHead } = await execFileAsync("git", ["rev-parse", options.workspaceRef], {
-    cwd: repositoryPath,
-    windowsHide: true,
-  });
-  const { stdout: specCommit } = await execFileAsync(
-    "git",
-    ["rev-parse", String((acceptance.spec as Record<string, unknown>).commit_sha)],
-    { cwd: repositoryPath, windowsHide: true },
-  );
-  await execFileAsync("git", ["merge-base", "--is-ancestor", specCommit.trim(), branchHead.trim()], {
-    cwd: repositoryPath,
-    windowsHide: true,
-  });
+  const normalizeRepository = (url: string) =>
+    url
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\.git$/i, "")
+      .toLowerCase();
+  if (
+    normalizeRepository(String((acceptance.spec as Record<string, unknown>).repository)) !==
+    normalizeRepository(resolved.productConfig.target_repository)
+  )
+    throw new Error("The accepted artifacts are not in product.yaml target_repository.");
+  const github = {
+    repositoryUrl: resolved.productConfig.target_repository,
+    apiBase: options.intentBacklogApiBase,
+    token: productRepositoryReadToken,
+    fetchFn: options.fetchFn,
+  };
+  // Coding starts from exactly what the human accepted, so the branch must not have moved since.
+  const acceptedCommit = String((acceptance.spec as Record<string, unknown>).commit_sha);
+  const branchHead = await readBranchTip({ ...github, branch: options.workspaceRef });
+  if (branchHead !== acceptedCommit)
+    throw new Error("The accepted Spec & Design branch moved after the human accepted its artifacts.");
 
   const frozenIntentPath = `.agent/work/${resolved.intentId}/intent.md`;
-  const frozenIntentOnBranch = await readCommittedWorkspaceFile(repositoryPath, branchHead.trim(), frozenIntentPath);
+  const frozenIntentOnBranch = await readFileAtCommit({ ...github, commit: acceptedCommit, path: frozenIntentPath });
   const expected: WorkContractExpectation = {
     productId: resolved.productId,
     intentId: resolved.intentId,
@@ -166,14 +153,12 @@ export async function loadAcceptedExecutionContract(
     specMarkdown: specText,
     specAcceptance: acceptance,
     frozenIntentPath,
-    frozenIntentBytes: Buffer.from(frozenIntentOnBranch, "utf8"),
+    frozenIntentBytes: frozenIntentOnBranch,
     targetRepository: expected.targetRepository,
     targetCommit: expected.targetCommit,
     expected,
     validator,
   });
-  if (branchHead.trim() !== specCommit.trim())
-    throw new Error("The accepted Spec & Design branch moved after the human accepted its artifacts.");
   const invocation = {
     schema_version: "1.1",
     invocation_id: randomUUID(),
@@ -182,7 +167,7 @@ export async function loadAcceptedExecutionContract(
     work_item: acceptance.work_item,
     freeze_activation: options.freezeActivation,
     input_artifacts: [acceptance.spec, acceptance.work_contract],
-    target: { repository: expected.targetRepository, commit_sha: branchHead.trim() },
+    target: { repository: expected.targetRepository, commit_sha: branchHead },
     workspace_ref: options.workspaceRef,
     read_paths: ["."],
     write_paths: ["."],
@@ -190,5 +175,5 @@ export async function loadAcceptedExecutionContract(
   const invocationValidation = validator.validate("StageInvocation", invocation);
   if (!invocationValidation.valid)
     throw new Error(`Execution StageInvocation is invalid: ${invocationValidation.errors.join("; ")}`);
-  return { workContract, invocation, repositoryPath, baseBranch: options.workspaceRef };
+  return { workContract, invocation, baseBranch: options.workspaceRef };
 }
