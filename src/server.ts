@@ -8,6 +8,7 @@ import {
   getWorkflowListIds,
   resolveBoardId,
   commentOnCard,
+  DEPLOY_PREFIX,
   type TrelloCard,
 } from "./trello/client.js";
 import { verifyTrelloSignature } from "./trello/webhookVerify.js";
@@ -17,12 +18,13 @@ import {
   handleCardReadyForAgent,
   handleCardReviewForAgent,
   handleCardRework,
+  handleDeployRequest,
   handleHumanApprovalMove,
   isHumanApprovalAction,
   handleCardSpecAndDesign,
 } from "./workflow/workflow.js";
 import { createLifecycleValidator } from "./contracts/lifecycle.js";
-import { boardTransitionFromWebhook } from "./trello/webhookEvent.js";
+import { boardTransitionFromWebhook, cardCommentFromWebhook } from "./trello/webhookEvent.js";
 import { processBoardTransition } from "./workflow/boardTransition.js";
 import { resolveSpecRequest } from "./workflow/specRequestFromCard.js";
 import { validateSpecAcceptanceRecord } from "./workflow/humanRecords.js";
@@ -66,6 +68,23 @@ app.post("/webhooks/trello", async (req, res) => {
     payload = JSON.parse(rawBody.toString("utf8"));
   } catch {
     console.warn("[trello-orchestrator] Webhook body was not valid JSON.");
+    return;
+  }
+
+  // The Release stage starts from an owner's "Deploy:" comment; every other comment is ignored.
+  const comment = cardCommentFromWebhook(payload);
+  if (comment) {
+    if (comment.board_id === configuredBoardId && DEPLOY_PREFIX.test(comment.text)) {
+      void handleDeployRequest(comment, async (card) => {
+        const resolved = await resolveSpecRequest(card, {
+          githubApiBase: config.intentBacklogApiBase,
+          intentBacklogReadToken: config.intentBacklogReadToken,
+          approvedBy: comment.actor_id,
+          approvedAt: comment.occurred_at,
+        });
+        return resolved.productConfig.authorized_product_owner_ids;
+      });
+    }
     return;
   }
 

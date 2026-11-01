@@ -177,7 +177,7 @@ test("the Orchestrator never posts a comment that reads as a person's written de
 
   try {
     const { commentOnCard } = await import("./client.js");
-    for (const text of ["Rationale: ship it", "  reason : looks fine", "RATIONALE:approve"]) {
+    for (const text of ["Rationale: ship it", "  reason : looks fine", "RATIONALE:approve", "Deploy: production"]) {
       await assert.rejects(() => commentOnCard("card-1", text), /written decision/);
     }
     await commentOnCard("card-1", "⛔ The Human Approval decision was not recorded: Rationale: missing");

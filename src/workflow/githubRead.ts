@@ -1,6 +1,6 @@
 // Copyright (c) 2026 DPSystems, LLC.
-// ABOUTME: Read-only GitHub lookups for a product repository: a branch tip and a file's exact bytes at a commit.
-// ABOUTME: Lets Execution check accepted work against GitHub instead of a local workspace whose path may differ.
+// ABOUTME: Read-only GitHub lookups for a product repository: branch tips, commits, files, and merged pull requests.
+// ABOUTME: Lets the Conductor check handoffs and integrations against GitHub instead of a local workspace.
 
 export interface GitHubReadOptions {
   repositoryUrl: string;
@@ -73,4 +73,61 @@ export async function readFileAtCommit(options: GitHubReadOptions & { commit: st
   if (!response.ok)
     throw new Error(`GitHub returned HTTP ${response.status} while reading ${path} at ${options.commit.slice(0, 12)}.`);
   return Buffer.from(await response.arrayBuffer());
+}
+
+export interface MergedPullRequest {
+  number: number;
+  headSha: string;
+  mergeCommitSha: string;
+  mergedAt: string;
+}
+
+/** Merged pull requests from one branch into another, newest merge first. Closed-unmerged ones are left out. */
+export async function readMergedPullRequests(
+  options: GitHubReadOptions & { head: string; base: string },
+): Promise<MergedPullRequest[]> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const api = repositoryApi(options);
+  const owner = api.split("/repos/")[1].split("/")[0];
+  const query = new URLSearchParams({
+    state: "closed",
+    head: `${owner}:${options.head}`,
+    base: options.base,
+    per_page: "20",
+  });
+  const response = await fetchFn(`${api}/pulls?${query.toString()}`, {
+    headers: headers(options.token, "application/vnd.github+json"),
+  });
+  if (!response.ok)
+    throw new Error(`GitHub returned HTTP ${response.status} while reading pull requests from ${options.head}.`);
+  const pulls = (await response.json()) as {
+    number?: unknown;
+    merged_at?: unknown;
+    merge_commit_sha?: unknown;
+    head?: { sha?: unknown };
+  }[];
+  return pulls
+    .filter((pull) => typeof pull.merged_at === "string" && typeof pull.merge_commit_sha === "string")
+    .map((pull) => ({
+      number: Number(pull.number),
+      headSha: String(pull.head?.sha ?? ""),
+      mergeCommitSha: String(pull.merge_commit_sha),
+      mergedAt: String(pull.merged_at),
+    }))
+    .sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt));
+}
+
+/** True when the commit is the branch tip or in its history. */
+export async function isOnBranch(options: GitHubReadOptions & { commit: string; branch: string }): Promise<boolean> {
+  const fetchFn = options.fetchFn ?? fetch;
+  if (!/^[0-9a-f]{40,64}$/.test(options.commit)) throw new Error("Only a full commit SHA can be compared.");
+  const response = await fetchFn(
+    `${repositoryApi(options)}/compare/${encodeURIComponent(options.branch)}...${options.commit}`,
+    { headers: headers(options.token, "application/vnd.github+json") },
+  );
+  if (!response.ok)
+    throw new Error(`GitHub returned HTTP ${response.status} while comparing ${options.commit.slice(0, 12)}.`);
+  // Comparing branch...commit: "behind" means the commit is in the branch's history; "identical" means it is the tip.
+  const { status } = (await response.json()) as { status?: unknown };
+  return status === "identical" || status === "behind";
 }

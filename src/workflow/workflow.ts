@@ -1,5 +1,5 @@
 // ABOUTME: Coordinates spec & design, coding, and evaluation transitions for Trello work items.
-import { runStageAgent, type StageAgentResult } from "../stageAgent/runStageAgent.js";
+import { runStageAgent, submitAndPoll, type StageAgentResult } from "../stageAgent/runStageAgent.js";
 import {
   CONTAINER_WORKSPACE,
   runSpecDesignAgent,
@@ -45,7 +45,15 @@ import {
   workContractRef,
   type PackageReads,
 } from "./evaluationStage.js";
-import { readBranchTip, readCommitParents, readFileAtCommit } from "./githubRead.js";
+import {
+  isOnBranch,
+  readBranchTip,
+  readCommitParents,
+  readFileAtCommit,
+  readMergedPullRequests,
+} from "./githubRead.js";
+import { handleDeployComment } from "./releaseStage.js";
+import type { CardCommentEvent } from "../trello/webhookEvent.js";
 import { humanRecordComment, recordHumanApproval, type HumanApprovalDecision } from "./humanApproval.js";
 
 const lifecycleValidator = createLifecycleValidator(config.lifecycleSchemaPath);
@@ -1148,9 +1156,10 @@ export async function handleHumanApprovalMove(
 ): Promise<void> {
   const { decision, destination } = humanApprovalDecisions[action];
   const card = await getCard(cardId);
+  const comments = await getCardComments(cardId);
   const outcome = recordHumanApproval({
     card,
-    comments: await getCardComments(cardId),
+    comments,
     actorId,
     recordedAt: occurredAt,
     decision,
@@ -1177,7 +1186,7 @@ export async function handleHumanApprovalMove(
     );
   }
   const next: Record<HumanApprovalDecision, string> = {
-    approved_for_integration_and_release: `The authorized integration path may now merge candidate \`${candidate}\` into the protected integration branch and release it. The Orchestrator does not merge or release.`,
+    approved_for_integration_and_release: integrationInstructions(outcome.record, comments, cardId),
     return_to_execution:
       "Rework from a human decision after a passing evaluation is recorded but not started automatically: the Coding Agent accepts only durable findings (an Evaluation Package) as rework input.",
     return_to_spec_and_design:
@@ -1186,6 +1195,78 @@ export async function handleHumanApprovalMove(
   };
   await commentOnCard(cardId, next[decision]);
 }
+/** What the owner does after approving: merge the work branch with a merge commit, then authorize the deployment. */
+function integrationInstructions(record: Record<string, unknown>, comments: TrelloComment[], cardId: string): string {
+  const candidate = record.candidate as Record<string, unknown>;
+  const repository = String(candidate.repository).replace(/\.git$/i, "");
+  const evaluation = latestStageRun(comments, "evaluation", cardId, lifecycleValidator);
+  const branch = evaluation ? String(evaluation.invocation.workspace_ref) : "";
+  const compare = branch
+    ? ` (${repository}/compare/${config.integrationBranch}...${branch.split("/").map(encodeURIComponent).join("/")}?expand=1)`
+    : "";
+  return [
+    `Next: open and merge the pull request${compare} into \`${config.integrationBranch}\` with **Create a merge commit**, once its required checks pass. Merge it as approved: a changed candidate needs a new evaluation and approval.`,
+    "Then authorize the production deployment with a comment on this card:",
+    "```\nDeploy: production\nRationale: <why it may go to production now>\n```",
+    `The Orchestrator never merges; the deploy service deploys only the merged commit of candidate \`${String(candidate.commit_sha)}\`.`,
+  ].join("\n\n");
+}
+
+/** An owner's comment starting with "Deploy:": verify the merge, record the authorization, deploy, record the release. */
+export async function handleDeployRequest(
+  event: CardCommentEvent,
+  productOwners: (card: TrelloCard) => Promise<string[]>,
+): Promise<void> {
+  try {
+    await handleDeployComment(event, {
+      getCard,
+      getCardComments,
+      commentOnCard,
+      productOwners,
+      integrationReads: async (repositoryUrl) => {
+        const token = await createGitHubAppReadToken({
+          appId: config.orchestratorGithubAppId,
+          installationId: config.orchestratorGithubAppInstallationId,
+          privateKeyFile: config.orchestratorGithubAppPrivateKeyFile,
+          repositoryUrl,
+        });
+        const github = { repositoryUrl, apiBase: config.intentBacklogApiBase, token };
+        return {
+          mergedPulls: (head, base) => readMergedPullRequests({ ...github, head, base }),
+          parentsOf: (commit) => readCommitParents({ ...github, commit }),
+          onBranch: (commit, branch) => isOnBranch({ ...github, commit, branch }),
+        };
+      },
+      deploy: async (request) => {
+        const polled = await submitAndPoll(
+          { collection: "deployments", noun: "deployment", id: String(request.deployment_id), body: request },
+          {
+            serviceName: "deploy service",
+            endpoint: config.deployServiceApiUrl,
+            token: config.deployServiceApiToken,
+            pollIntervalMs: config.deployServicePollIntervalMs,
+            timeoutMs: config.deployServiceTimeoutMs,
+          },
+        );
+        const report = polled.view?.report;
+        return report && typeof report === "object" && !Array.isArray(report)
+          ? { report: report as Record<string, unknown>, error: null }
+          : { report: null, error: polled.error ?? "the deploy service finished without a report" };
+      },
+      deployConfigured: Boolean(config.deployServiceApiUrl && config.deployServiceApiToken),
+      releaseListId: getWorkflowListId("release"),
+      boardId: config.boardId,
+      integrationBranch: config.integrationBranch,
+      validator: lifecycleValidator,
+    });
+  } catch (err) {
+    await commentOnCard(
+      event.card_id,
+      `❌ The deployment request stopped with an error: ${err instanceof Error ? err.message : String(err)}. Check the card and the product before trying again; the card stays in Release.`,
+    );
+  }
+}
+
 /** An Evaluation -> Execution move: rework, if the newest verified evaluation routed there. */
 export async function handleCardRework(cardId: string, eventId: string): Promise<void> {
   await startRework(cardId, eventId);

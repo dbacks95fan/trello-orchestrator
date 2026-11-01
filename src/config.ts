@@ -70,6 +70,14 @@ export const config = {
   evaluatorTimeoutMs: Number(process.env.EVALUATOR_TIMEOUT_MS ?? "3600000"),
   // Automatic Evaluation -> Execution rework runs allowed under one freeze before a human must step in.
   evaluationReworkLimit: Number(process.env.EVALUATION_REWORK_LIMIT ?? "2"),
+  // The deploy service on the NAS runs an owner-authorized deployment of a merged candidate.
+  // Without a URL, "Deploy:" comments are refused with a note on the card.
+  deployServiceApiUrl: process.env.DEPLOY_SERVICE_API_URL ?? "",
+  deployServiceApiToken: process.env.DEPLOY_SERVICE_API_TOKEN ?? "",
+  deployServicePollIntervalMs: Number(process.env.DEPLOY_SERVICE_POLL_INTERVAL_MS ?? "10000"),
+  deployServiceTimeoutMs: Number(process.env.DEPLOY_SERVICE_TIMEOUT_MS ?? "1800000"),
+  // The product's protected integration branch that the owner merges approved candidates into.
+  integrationBranch: process.env.INTEGRATION_BRANCH ?? "main",
   targetRepo,
   // Where the isolated per-work-item clones are created before being bind-mounted
   // into the container at /work.

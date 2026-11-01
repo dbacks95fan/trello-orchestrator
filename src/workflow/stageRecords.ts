@@ -4,7 +4,7 @@
 import type { LifecycleValidator } from "../contracts/lifecycle.js";
 import type { TrelloComment } from "../trello/client.js";
 
-export type MachineRecordKind = "stage-invocation" | "stage-result" | "stage-result-decision";
+export type MachineRecordKind = "stage-invocation" | "stage-result" | "stage-result-decision" | "release-record";
 
 export function parseMachineRecord(text: string, kind: MachineRecordKind): Record<string, unknown> | null {
   const marker = `<!-- agentic-sdlc-${kind} `;

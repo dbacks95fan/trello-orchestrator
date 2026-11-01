@@ -1,8 +1,9 @@
 // Copyright (c) 2026 DPSystems, LLC.
-// ABOUTME: Verifies the Orchestrator submits a StageInvocation to a stage worker service and handles every service outcome.
+// ABOUTME: Verifies the Orchestrator submits a StageInvocation to a stage worker service and handles every service outcome,
+// ABOUTME: and that the shared submit-and-poll boundary also serves the deploy service.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runStageAgent, type StageAgentRunOptions, type FetchRequest } from "./runStageAgent.js";
+import { runStageAgent, submitAndPoll, type StageAgentRunOptions, type FetchRequest } from "./runStageAgent.js";
 
 const invocation = {
   invocation_id: "invocation-1",
@@ -209,4 +210,30 @@ test("the Evaluator's package is returned and messages name the Evaluator servic
   const { requestFn: refusing } = scripted([new Response("no", { status: 401 })]);
   const refused = await runStageAgent(invocation, options(refusing, { serviceName: "Evaluator" }));
   assert.equal(refused.error, "The Evaluator service rejected the Orchestrator's API token (HTTP 401).");
+});
+
+test("the deploy service uses the same boundary under /deployments, with deployment wording", async () => {
+  const request = { deployment_id: "deploy-c1", environment: "production" };
+  const { requestFn, requests } = scripted([
+    Response.json({ deployment_id: "deploy-c1", state: "running" }, { status: 202 }),
+    Response.json({ deployment_id: "deploy-c1", state: "done", report: { status: "released" } }),
+  ]);
+  const polled = await submitAndPoll(
+    { collection: "deployments", noun: "deployment", id: "deploy-c1", body: request },
+    options(requestFn, { serviceName: "deploy service", endpoint: "http://nas.test:8082" }),
+  );
+  assert.equal(polled.error, null);
+  assert.deepEqual(polled.view?.report, { status: "released" });
+  assert.deepEqual(
+    requests.map((r) => `${r.method} ${r.url}`),
+    ["POST http://nas.test:8082/deployments", "GET http://nas.test:8082/deployments/deploy-c1"],
+  );
+  assert.deepEqual(JSON.parse(requests[0].body), request);
+
+  const busy = scripted([new Response("{}", { status: 409 })]);
+  const refused = await submitAndPoll(
+    { collection: "deployments", noun: "deployment", id: "deploy-c1", body: request },
+    options(busy.requestFn, { serviceName: "deploy service" }),
+  );
+  assert.match(refused.error ?? "", /different content for this deployment ID \(HTTP 409\)/);
 });
