@@ -1,5 +1,6 @@
 // ABOUTME: Coordinates spec & design, coding, and evaluation transitions for Trello work items.
-import { runStageAgent, submitAndPoll, type StageAgentResult } from "../stageAgent/runStageAgent.js";
+import { runStageAgent, type StageAgentResult } from "../stageAgent/runStageAgent.js";
+import { requestDeployment } from "./deployService.js";
 import {
   CONTAINER_WORKSPACE,
   runSpecDesignAgent,
@@ -1237,22 +1238,12 @@ export async function handleDeployRequest(
           onBranch: (commit, branch) => isOnBranch({ ...github, commit, branch }),
         };
       },
-      deploy: async (request) => {
-        const polled = await submitAndPoll(
-          { collection: "deployments", noun: "deployment", id: String(request.deployment_id), body: request },
-          {
-            serviceName: "deploy service",
-            endpoint: config.deployServiceApiUrl,
-            token: config.deployServiceApiToken,
-            pollIntervalMs: config.deployServicePollIntervalMs,
-            timeoutMs: config.deployServiceTimeoutMs,
-          },
-        );
-        const report = polled.view?.report;
-        return report && typeof report === "object" && !Array.isArray(report)
-          ? { report: report as Record<string, unknown>, error: null }
-          : { report: null, error: polled.error ?? "the deploy service finished without a report" };
-      },
+      deploy: (request) =>
+        requestDeployment(request, {
+          endpoint: config.deployServiceApiUrl,
+          token: config.deployServiceApiToken,
+          timeoutMs: config.deployServiceTimeoutMs,
+        }),
       deployConfigured: Boolean(config.deployServiceApiUrl && config.deployServiceApiToken),
       releaseListId: getWorkflowListId("release"),
       boardId: config.boardId,

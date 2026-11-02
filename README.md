@@ -249,8 +249,9 @@ records remain manual and are not enforced by this build.
    line (a `commentCard` webhook) starts a deployment: the Orchestrator checks
    on GitHub that the merged pull request merged exactly the evaluated commit,
    records the `DeploymentAuthorizationRecord`, calls the NAS deploy service at
-   `DEPLOY_SERVICE_API_URL/deployments`, and records the `ReleaseRecord` from its
-   report. Production Observation and Done are not yet validated. The
+   `DEPLOY_SERVICE_API_URL/deployments` and waits for its answer, and records
+   the `ReleaseRecord` from its report. Production Observation and Done are not
+   yet validated. The
    Orchestrator never merges, never deploys by itself, and never moves a card to
    Done.
 

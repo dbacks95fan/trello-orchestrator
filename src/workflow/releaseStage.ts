@@ -265,7 +265,7 @@ export async function handleDeployComment(event: CardCommentEvent, deps: Release
   if (!outcome.report) {
     await deps.commentOnCard(
       card.id,
-      `❌ The deploy service did not return a result: ${outcome.error ?? "no report"}. The outcome is unknown; check the product before deploying again. The card stays in Release.`,
+      `❌ The deploy service did not return a result: ${outcome.error ?? "no report"}. The outcome is unknown; check the product and the deploy service's log (its \`deployment_finished\` entry) before deploying again. The card stays in Release.`,
     );
     return;
   }
