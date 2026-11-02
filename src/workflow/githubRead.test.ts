@@ -1,8 +1,8 @@
 // Copyright (c) 2026 DPSystems, LLC.
-// ABOUTME: Unit tests for the read-only GitHub branch-tip and file-at-commit lookups.
+// ABOUTME: Unit tests for the read-only GitHub lookups: branch tips, files at a commit, merged pulls, and ancestry.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readBranchTip, readFileAtCommit } from "./githubRead.js";
+import { isOnBranch, readBranchTip, readFileAtCommit, readMergedPullRequests } from "./githubRead.js";
 
 const SHA = "c".repeat(40);
 const base = {
@@ -75,4 +75,50 @@ test("refuses unsafe paths, short revisions, and missing files", async () => {
     }),
     /HTTP 404 while reading a.md at cccccccccccc/,
   );
+});
+
+test("lists only merged pull requests from the work branch, newest merge first", async () => {
+  const { calls, fetchFn } = recording(() =>
+    Response.json([
+      { number: 1, merged_at: "2026-11-01T10:00:00Z", merge_commit_sha: "a".repeat(40), head: { sha: "b".repeat(40) } },
+      { number: 2, merged_at: null, merge_commit_sha: "c".repeat(40), head: { sha: "d".repeat(40) } },
+      { number: 3, merged_at: "2026-11-01T12:00:00Z", merge_commit_sha: "e".repeat(40), head: { sha: "f".repeat(40) } },
+    ]),
+  );
+  const pulls = await readMergedPullRequests({ ...base, fetchFn, head: "work/INT-MF-0042", base: "main" });
+  assert.deepEqual(
+    pulls.map((p) => p.number),
+    [3, 1],
+  );
+  assert.equal(pulls[0].headSha, "f".repeat(40));
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/repos/Example/MealFlow/pulls");
+  assert.equal(url.searchParams.get("head"), "Example:work/INT-MF-0042");
+  assert.equal(url.searchParams.get("state"), "closed");
+  assert.equal(url.searchParams.get("base"), "main");
+  assert.equal(calls[0].headers.Authorization, "Bearer t");
+});
+
+test("a commit is on the branch only when the comparison says it is the tip or behind it", async () => {
+  for (const [status, expected] of [
+    ["identical", true],
+    ["behind", true],
+    ["ahead", false],
+    ["diverged", false],
+  ] as const) {
+    const { calls, fetchFn } = recording(() => Response.json({ status }));
+    assert.equal(await isOnBranch({ ...base, fetchFn, commit: SHA, branch: "main" }), expected, status);
+    assert.ok(calls[0].url.endsWith(`/repos/Example/MealFlow/compare/main...${SHA}`), calls[0].url);
+  }
+  await assert.rejects(
+    () =>
+      isOnBranch({
+        ...base,
+        fetchFn: recording(() => new Response("", { status: 404 })).fetchFn,
+        commit: SHA,
+        branch: "main",
+      }),
+    /HTTP 404/,
+  );
+  await assert.rejects(() => isOnBranch({ ...base, commit: "abc", branch: "main" }), /full commit SHA/);
 });

@@ -41,6 +41,8 @@ export type LifecycleDefinition =
   | "EvidencePackage"
   | "EvaluationPackage"
   | "HumanApprovalRecord"
+  | "DeploymentAuthorizationRecord"
+  | "TrelloRecordRef"
   | "ReleaseRecord"
   | "ObservationRecord"
   | "ClosureRecord";

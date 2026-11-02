@@ -198,3 +198,14 @@ tell us apart; the guard is in code instead. Cards move only along four
 Orchestrator routes, and only from where the route starts, never out of Human
 Approval, Release, or Production Observation. No Orchestrator comment may start
 with "Rationale:" or "Reason:".
+
+Also 2026-11-01, the Release stage: Sobe merges approved PRs by hand (MealFlow's
+main is protected and now requires build-and-test from GitHub Actions on an
+up-to-date branch) and wanted the deploy automated, so a new private
+deploy-service runs on the NAS. On the card in Release, Sobe comments
+"Deploy: production" plus a "Rationale:". We check the merge read-only on
+GitHub (the merged PR's head must be the evaluated commit, merged with a merge
+commit), write the canonical DeploymentAuthorizationRecord pointing at that
+comment with a fingerprint of its text, hand it to the deploy service, and
+write the ReleaseRecord 1.1 from its report. "Deploy:" joins the comment
+openings we refuse to post, since we post with Sobe's Trello identity.

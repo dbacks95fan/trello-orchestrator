@@ -238,14 +238,21 @@ export async function updateCardDescription(cardId: string, desc: string): Promi
   });
 }
 
+/** Human Approval reads the owner's rationale from a comment that starts this way. */
+export const RATIONALE_PREFIX = /^\s*(rationale|reason)\s*:\s*/i;
+/** A comment that starts this way is the owner's request to deploy the merged candidate. */
+export const DEPLOY_PREFIX = /^\s*deploy\s*:/i;
+
 /**
- * A person's written decision: Human Approval reads the owner's rationale from comments that start this way. The
- * Orchestrator comments with the owner's Trello identity, so it never posts one, even when relaying agent text.
+ * True for text that reads as a person's written decision. The Orchestrator comments with the owner's Trello
+ * identity, so it never posts one, even when relaying agent text.
  */
-export const HUMAN_DECISION_PREFIX = /^\s*(rationale|reason)\s*:\s*/i;
+export function readsAsHumanDecision(text: string): boolean {
+  return RATIONALE_PREFIX.test(text) || DEPLOY_PREFIX.test(text);
+}
 
 export async function commentOnCard(cardId: string, text: string): Promise<void> {
-  if (HUMAN_DECISION_PREFIX.test(text)) {
+  if (readsAsHumanDecision(text)) {
     throw new Error("The Orchestrator does not post comments that read as a person's written decision.");
   }
   await trelloFetch(`/cards/${cardId}/actions/comments`, {
