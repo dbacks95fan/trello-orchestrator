@@ -105,7 +105,8 @@ engineering-stage handler for that work item:
 2. It fetches the exact `intent.md` bytes from the `intent-backlog` repository at
    the pinned `Intent Commit` through the GitHub contents API, and refuses to
    continue if the card and canonical intent disagree on identity, version,
-   content hash, or policy-profile ID/version. It resolves `product.yaml` and
+   or policy-profile ID/version, or if the card's `Intent Hash` is not the
+   SHA-256 of those exact bytes. It resolves `product.yaml` and
    the selected profile at that same pinned commit and verifies the profile.
 3. It creates an invocation bundle under `SPEC_WORKSPACE_ROOT` containing
    byte-exact frozen inputs at `.agent/inputs/<invocation-id>/intent.md` and

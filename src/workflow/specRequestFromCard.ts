@@ -223,11 +223,9 @@ function str(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
 
-/** Reads the first frontmatter key that is present. `agentic-sdlc/docs/ARTIFACTS.md`
- *  makes `intent_commit` / `intent_hash` canonical and forbids local aliases, but
- *  existing backlog artifacts were written with `git_commit` / `content_hash`.
- *  Accepting both keeps the canonical name authoritative while still reading the
- *  intents that already exist. */
+/** Reads the first frontmatter key that is present. Older backlog artifacts record
+ *  their commit as `git_commit` rather than `intent_commit`; accepting both keeps
+ *  reading the intents that already exist. */
 function frontmatterValue(fm: Record<string, unknown>, ...names: string[]): string {
   for (const name of names) {
     const value = str(fm[name]);
@@ -256,9 +254,10 @@ export async function resolveSpecRequest(
     mismatches.push(`product_id (card ${meta.productId} vs backlog ${str(fm.product_id) || "missing"})`);
   if (Number(fm.intent_version) !== meta.intentVersion)
     mismatches.push(`intent_version (card ${meta.intentVersion} vs backlog ${str(fm.intent_version) || "missing"})`);
-  const backlogHash = frontmatterValue(fm, "intent_hash", "content_hash").match(CONTENT_HASH)?.[1];
-  if (backlogHash !== meta.intentContentSha256)
-    mismatches.push("intent_hash (card projection and backlog artifact disagree)");
+  // The fingerprint is the SHA-256 of the exact bytes at the pinned commit. intent.md cannot
+  // carry its own hash (agentic-sdlc INTENT_CREATION_SKILL.md), so any hash in its frontmatter is ignored.
+  if (frozenArtifactSha256(frozenIntentBytes) !== meta.intentContentSha256)
+    mismatches.push("intent fingerprint (the card's Intent Hash is not the SHA-256 of intent.md at its Intent Commit)");
   if (str(fm.policy_profile_id) !== meta.policyProfileId)
     mismatches.push("policy_profile_id (card projection and backlog artifact disagree)");
   if (str(fm.policy_profile_version) !== meta.policyProfileVersion)

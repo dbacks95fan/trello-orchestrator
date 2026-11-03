@@ -25,7 +25,6 @@ function intentMarkdown(overrides: Record<string, string> = {}): string {
     intent_version: "3",
     status: "Frozen",
     intent_commit: COMMIT,
-    intent_hash: `sha256:${"d".repeat(64)}`,
     policy_profile_id: "MF-DEFAULT",
     policy_profile_version: "1",
     frozen_at: "2026-08-01T12:00:00.000Z",
@@ -52,13 +51,18 @@ function card(desc: string): TrelloCard {
   };
 }
 
-function description(overrides: Record<string, string> = {}): string {
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/** A card projection whose Intent Hash is the fingerprint of `markdown`, the intent it points at. */
+function description(overrides: Record<string, string> = {}, markdown = intentMarkdown()): string {
   const lines: Record<string, string> = {
     Product: "MealFlow (MF)",
     "Intent ID": "INT-MF-0042",
     "Intent Version": "3",
     "Intent Commit": COMMIT,
-    "Intent Hash": `sha256:${"d".repeat(64)}`,
+    "Intent Hash": `sha256:${sha256(markdown)}`,
     "Intent Status": "Frozen",
     "Canonical intent": CANONICAL,
     "Policy Profile ID": "MF-DEFAULT",
@@ -100,7 +104,7 @@ test("parseCardIntentMetadata reads the Intent Creation Skill card projection", 
   assert.equal(meta.intentId, "INT-MF-0042");
   assert.equal(meta.intentVersion, 3);
   assert.equal(meta.intentCommit, COMMIT);
-  assert.equal(meta.intentContentSha256, "d".repeat(64));
+  assert.equal(meta.intentContentSha256, sha256(intentMarkdown()));
   assert.equal(meta.intentStatus, "Frozen");
 });
 
@@ -164,7 +168,7 @@ test("resolveSpecRequest returns a request grounded in the fetched frozen intent
   assert.equal(resolved.productId, "MF");
   assert.equal(resolved.intentRepository, "dbacks95fan/intent-backlog");
   assert.equal(resolved.intentPath, PATH);
-  assert.equal(resolved.intentContentSha256, "d".repeat(64));
+  assert.equal(resolved.intentContentSha256, sha256(markdown));
   assert.deepEqual(resolved.frozenIntentBytes, Buffer.from(markdown));
   assert.equal(resolved.policyProfileId, "MF-DEFAULT");
   assert.deepEqual(resolved.frozenPolicyProfileBytes, Buffer.from(PROFILE));
@@ -206,18 +210,40 @@ test("resolveSpecRequest fails when the card and the canonical intent disagree",
   );
 
   await assert.rejects(
-    resolveSpecRequest(card(description()), {
+    resolveSpecRequest(card(description({ "Intent Hash": `sha256:${"e".repeat(64)}` })), {
       ...baseOptions,
-      fetchFn: stubFetch(intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })),
+      fetchFn: stubFetch(intentMarkdown()),
     }),
-    (err: Error) => err instanceof SpecRequestError && /intent_hash/.test(err.message),
+    (err: Error) => err instanceof SpecRequestError && /intent fingerprint/.test(err.message),
   );
 });
 
-test("resolveSpecRequest warns but proceeds on a self-referential commit field", async () => {
-  const resolved = await resolveSpecRequest(card(description()), {
+test("resolveSpecRequest fingerprints the exact bytes, so a line-ending change is refused", async () => {
+  const markdown = intentMarkdown();
+  await assert.rejects(
+    resolveSpecRequest(card(description({}, markdown)), {
+      ...baseOptions,
+      fetchFn: stubFetch(markdown.replace(/\n/g, "\r\n")),
+    }),
+    (err: Error) => err instanceof SpecRequestError && /intent fingerprint/.test(err.message),
+  );
+});
+
+test("resolveSpecRequest ignores a hash recorded inside intent.md", async () => {
+  // intent.md cannot contain its own fingerprint, so a frontmatter hash is never compared.
+  const markdown = intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` });
+  const resolved = await resolveSpecRequest(card(description({}, markdown)), {
     ...baseOptions,
-    fetchFn: stubFetch(intentMarkdown({ intent_commit: "b".repeat(40) })),
+    fetchFn: stubFetch(markdown),
+  });
+  assert.equal(resolved.intentContentSha256, sha256(markdown));
+});
+
+test("resolveSpecRequest warns but proceeds on a self-referential commit field", async () => {
+  const markdown = intentMarkdown({ intent_commit: "b".repeat(40) });
+  const resolved = await resolveSpecRequest(card(description({}, markdown)), {
+    ...baseOptions,
+    fetchFn: stubFetch(markdown),
   });
   assert.equal(resolved.warnings.length, 1);
   assert.match(resolved.warnings[0], /intent_commit/);
@@ -247,41 +273,33 @@ test("parseCardIntentMetadata accepts an Intent Hash with no sha256: prefix", ()
   assert.equal(parseCardIntentMetadata(card(desc)).intentContentSha256, "d".repeat(64));
 });
 
-test("resolveSpecRequest reads legacy git_commit / content_hash frontmatter keys", async () => {
-  // Existing backlog artifacts predate the canonical intent_commit / intent_hash
-  // names; both spellings must reconcile against the same card.
-  const legacy = intentMarkdown().replace("intent_commit:", "git_commit:").replace("intent_hash:", "content_hash:");
-  const resolved = await resolveSpecRequest(card(description()), {
+test("resolveSpecRequest reads the legacy git_commit frontmatter key", async () => {
+  // Existing backlog artifacts predate the intent_commit name; a matching legacy
+  // commit must reconcile against the card without a warning.
+  const legacy = intentMarkdown().replace("intent_commit:", "git_commit:");
+  const resolved = await resolveSpecRequest(card(description({}, legacy)), {
     ...baseOptions,
     fetchFn: stubFetch(legacy),
   });
-  assert.equal(resolved.intentContentSha256, "d".repeat(64));
-  assert.deepEqual(resolved.warnings, [], "matching legacy keys must not warn");
-});
-
-test("resolveSpecRequest still rejects a genuine hash disagreement under legacy keys", async () => {
-  const legacy = intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })
-    .replace("intent_commit:", "git_commit:")
-    .replace("intent_hash:", "content_hash:");
-  await assert.rejects(
-    resolveSpecRequest(card(description()), { ...baseOptions, fetchFn: stubFetch(legacy) }),
-    (err: Error) => err instanceof SpecRequestError && /intent_hash/.test(err.message),
-  );
+  assert.equal(resolved.intentContentSha256, sha256(legacy));
+  assert.deepEqual(resolved.warnings, [], "a matching legacy key must not warn");
 });
 
 test("resolveSpecRequest proceeds for an intent that is not frozen", async () => {
-  const resolved = await resolveSpecRequest(card(description({ "Intent Status": "New Ideas" })), {
+  const markdown = intentMarkdown({ status: "New Ideas" });
+  const resolved = await resolveSpecRequest(card(description({ "Intent Status": "New Ideas" }, markdown)), {
     ...baseOptions,
-    fetchFn: stubFetch(intentMarkdown({ status: "New Ideas" })),
+    fetchFn: stubFetch(markdown),
   });
   assert.equal(resolved.intentId, "INT-MF-0042");
   assert.deepEqual(resolved.warnings, [], "agreeing on a non-frozen status is not worth a warning");
 });
 
 test("resolveSpecRequest warns, but does not fail, when card and backlog status disagree", async () => {
-  const resolved = await resolveSpecRequest(card(description({ "Intent Status": "Frozen" })), {
+  const markdown = intentMarkdown({ status: "New Ideas" });
+  const resolved = await resolveSpecRequest(card(description({ "Intent Status": "Frozen" }, markdown)), {
     ...baseOptions,
-    fetchFn: stubFetch(intentMarkdown({ status: "New Ideas" })),
+    fetchFn: stubFetch(markdown),
   });
   assert.equal(resolved.intentId, "INT-MF-0042");
   assert.equal(resolved.warnings.length, 1);
@@ -298,9 +316,9 @@ test("identity and hash disagreements are still hard failures", async () => {
     SpecRequestError,
   );
   await assert.rejects(
-    resolveSpecRequest(card(description()), {
+    resolveSpecRequest(card(description({ "Intent Hash": `sha256:${"e".repeat(64)}` })), {
       ...baseOptions,
-      fetchFn: stubFetch(intentMarkdown({ intent_hash: `sha256:${"e".repeat(64)}` })),
+      fetchFn: stubFetch(intentMarkdown()),
     }),
     SpecRequestError,
   );
