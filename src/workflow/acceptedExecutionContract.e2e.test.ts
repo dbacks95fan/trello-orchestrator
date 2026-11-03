@@ -17,7 +17,6 @@ const backlogUrl = "https://github.com/example/intent-backlog";
 const intentCommit = "a".repeat(40);
 const baseCommit = "b".repeat(40);
 const artifactCommit = "c".repeat(40);
-const intentHashProjection = "d".repeat(64);
 const workspaceRef = `work/${intentId}`;
 const profile = "Profile ID: MF-DEFAULT\nVersion: 1\n";
 const frozenIntent = Buffer.from(
@@ -26,7 +25,6 @@ const frozenIntent = Buffer.from(
     `intent_id: ${intentId}`,
     "product_id: MF",
     "intent_version: 3",
-    `intent_hash: sha256:${intentHashProjection}`,
     "policy_profile_id: MF-DEFAULT",
     "policy_profile_version: 1",
     "status: Frozen",
@@ -106,7 +104,7 @@ function acceptedCard(): TrelloCard {
       `Intent ID: ${intentId}`,
       "Intent Version: 3",
       `Intent Commit: ${intentCommit}`,
-      `Intent Hash: sha256:${intentHashProjection}`,
+      `Intent Hash: sha256:${digest(frozenIntent)}`,
       "Policy Profile ID: MF-DEFAULT",
       "Policy Profile Version: 1",
       `Canonical intent: ${backlogUrl}/blob/${intentCommit}/${backlogIntentPath}`,

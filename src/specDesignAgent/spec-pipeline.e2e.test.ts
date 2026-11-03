@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,7 +18,6 @@ const FAKE_DOCKER = join(here, "__fixtures__", "fake-docker.cjs");
 
 const PATH = "products/mealflow/intents/INT-MF-0042/intent.md";
 const COMMIT = "a".repeat(40);
-const HASH = "d".repeat(64);
 const PROFILE = "Profile ID: MF-DEFAULT\nVersion: 1\n";
 
 function initTargetRepo(): string {
@@ -47,7 +47,6 @@ function intentMarkdown(): string {
     "intent_version: 3",
     "status: Frozen",
     `intent_commit: ${COMMIT}`,
-    `intent_hash: sha256:${HASH}`,
     "policy_profile_id: MF-DEFAULT",
     "policy_profile_version: 1",
     "frozen_at: 2026-08-01T12:00:00.000Z",
@@ -70,7 +69,7 @@ function card(): TrelloCard {
       "Intent ID: INT-MF-0042",
       "Intent Version: 3",
       `Intent Commit: ${COMMIT}`,
-      `Intent Hash: sha256:${HASH}`,
+      `Intent Hash: sha256:${createHash("sha256").update(intentMarkdown()).digest("hex")}`,
       "Intent Status: Frozen",
       "Policy Profile ID: MF-DEFAULT",
       "Policy Profile Version: 1",
